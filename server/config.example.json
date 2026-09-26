@@ -1,0 +1,219 @@
+{
+  "_readme": "工作站边车配置模板。 这个文件不会被程序读取 —— 首次运行会自动生成 server/config.json（带随机令牌）。 要改配置：在页面「设置与数据」里改（推荐），或直接编辑 server/config.json。 带目录 / 地址的项出厂都是空串；对应模块没配好时会从侧边栏隐藏（没配 = 不显示）。 密钥不在这个文件里：它们在 server/credentials.json（首次运行自动生成）。 以 \"//\" 开头的键只是说明，删掉无妨。",
+  "// port": "边车监听端口；改完记得同步前端的 VITE_SIDECAR_URL 与启动脚本",
+  "port": 5278,
+  "// auth": "本地访问控制：Origin 白名单 + 本地令牌。令牌首次运行会随机生成并写回本文件",
+  "auth": {
+    "enabled": true,
+    "token": "",
+    "allowedOrigins": [
+      "http://127.0.0.1:5278",
+      "http://localhost:5278",
+      "http://127.0.0.1:5273",
+      "http://localhost:5273"
+    ]
+  },
+  "// newapi": "OpenAI 兼容端点：面板类接口（余额/日志）与对话都在这个地址上。token 是敏感项，实际值在 credentials.json",
+  "newapi": {
+    "baseUrl": "",
+    "token": ""
+  },
+  "// ai": "对话默认模型。密钥在 credentials.json 的 llm.keys.workstation",
+  "ai": {
+    "model": "",
+    "models": [],
+    "maxTokens": 1500,
+    "temperature": 0.6,
+    "persona": "服务对象是一名在校大学生",
+    "personaPrivate": ""
+  },
+  "// workstation": "工作站自己的开机自启项（启动文件夹里的 .lnk 文件名）",
+  "workstation": {
+    "autostartEntry": "工作站管家.lnk",
+    "autostartLog": "logs/sidecar-autostart.log"
+  },
+  "// startupDir": "启动文件夹；留空 = 自动取 %APPDATA%MicrosoftWindowsStart MenuProgramsStartup",
+  "startupDir": "",
+  "// asr": "转写后端（语音随记用）：任一 OpenAI 兼容的 /audio/transcriptions。baseUrl 留空则该模块不显示",
+  "asr": {
+    "provider": "openai",
+    "baseUrl": "",
+    "model": "whisper-1",
+    "language": "",
+    "timeoutSec": 600
+  },
+  "// procscan": "进程/端口/智能体三个视图的本地扩展：agentExtras 里加 {id, images: [进程名], hints: [命令行片段]}",
+  "procscan": {
+    "agentExtras": []
+  },
+  "// pguard": "进程守护引擎：只放「开不开、数据放哪」，规则阈值在 dataDir 下的 config.json 里",
+  "pguard": {
+    "enabled": true,
+    "dataDir": ""
+  },
+  "// llm": "全站模型预设与任务路由；apiKey 走 credentials.json 的 llm.keys",
+  "llm": {
+    "activePresetId": "workstation",
+    "configs": {},
+    "keys": {},
+    "customPresets": [],
+    "taskRouting": {
+      "chat": "",
+      "ingest": ""
+    },
+    "reasoning": "auto",
+    "maxContextSize": 128000
+  },
+  "// embedding": "语义检索的嵌入端点；留空 = 自动退回词法检索。apiKey 走 credentials.json",
+  "embedding": {
+    "enabled": false,
+    "endpoint": "",
+    "model": "bge-m3",
+    "apiKey": "",
+    "batchSize": 8,
+    "concurrency": 2,
+    "chunkChars": 500,
+    "chunkOverlap": 80,
+    "maxPages": 5000,
+    "outputDimensionality": 0,
+    "extraHeaders": {}
+  },
+  "// search": "网络搜索 provider（none/serpapi/searxng/…）+ 本机文件检索（AnyTXT）。apiKey 走 credentials.json",
+  "search": {
+    "provider": "none",
+    "apiKey": "",
+    "serpApiEngine": "google",
+    "searXngUrl": "",
+    "searXngCategories": [
+      "general"
+    ],
+    "ollamaUrl": "https://ollama.com",
+    "providerConfigs": {},
+    "defaultSource": "wiki",
+    "maxResults": 10,
+    "anyTxt": {
+      "enabled": false,
+      "endpoint": "http://127.0.0.1:9920/",
+      "filterDir": "",
+      "filterExt": "",
+      "limit": 20
+    }
+  },
+  "// docparse": "文档解析：云端 MinerU 优先，本机通道（pandoc/LibreOffice/Python/pdftotext）兜底。mineru.token 在 credentials.json；tools 留空则按 PATH 找",
+  "docparse": {
+    "mineru": {
+      "enabled": true,
+      "endpoint": "https://mineru.net/api/v4",
+      "modelVersion": "vlm",
+      "language": "ch",
+      "isOcr": true,
+      "timeoutSec": 300,
+      "token": ""
+    },
+    "tools": {
+      "pandoc": "",
+      "soffice": "",
+      "python": "",
+      "pdftotext": ""
+    }
+  },
+  "// network": "只影响本模块自己的外呼（网络搜索 / 抓链接 / 云端解析）",
+  "network": {
+    "proxy": {
+      "enabled": false,
+      "url": ""
+    }
+  },
+  "// outputLanguage": "编译与问答的提示词按它写：Chinese / English / auto",
+  "outputLanguage": "Chinese",
+  "// wiki": "知识库：dir 是库根目录（留空则该模块不显示）。格式见 docs/architecture.md",
+  "wiki": {
+    "dir": "",
+    "model": "",
+    "maxChars": 24000,
+    "chatMaxTokens": 1600,
+    "embedding": {
+      "enabled": false,
+      "endpoint": "",
+      "model": "bge-m3",
+      "apiKey": "",
+      "batchSize": 8,
+      "concurrency": 2,
+      "chunkChars": 500,
+      "chunkOverlap": 80,
+      "maxPages": 5000
+    },
+    "llm": {
+      "activePresetId": "workstation",
+      "configs": {},
+      "keys": {},
+      "customPresets": [],
+      "taskRouting": {
+        "chat": "",
+        "ingest": ""
+      },
+      "reasoning": "auto",
+      "maxContextSize": 128000
+    },
+    "search": {
+      "provider": "none",
+      "apiKey": "",
+      "serpApiEngine": "google",
+      "searXngUrl": "",
+      "searXngCategories": [
+        "general"
+      ],
+      "ollamaUrl": "https://ollama.com",
+      "providerConfigs": {},
+      "defaultSource": "wiki",
+      "maxResults": 10,
+      "anyTxt": {
+        "enabled": false,
+        "endpoint": "http://127.0.0.1:9920/",
+        "filterDir": "",
+        "filterExt": "",
+        "limit": 20
+      }
+    },
+    "output": {
+      "language": "Chinese"
+    },
+    "network": {
+      "proxy": {
+        "enabled": false,
+        "url": ""
+      }
+    },
+    "scheduledImport": {
+      "enabled": false,
+      "intervalMin": 60
+    },
+    "mineru": {
+      "enabled": true,
+      "endpoint": "https://mineru.net/api/v4",
+      "modelVersion": "vlm",
+      "language": "ch",
+      "isOcr": true,
+      "timeoutSec": 300,
+      "token": ""
+    },
+    "watchEnabled": false,
+    "watchAutoIngest": false,
+    "watchIntervalMin": 30,
+    "watchMaxFileSizeMb": 100,
+    "watchDirs": [],
+    "watchExcludeDirs": [
+      ".git",
+      ".svn",
+      ".hg",
+      ".obsidian",
+      ".idea",
+      ".vscode",
+      "node_modules",
+      ".cache",
+      "__pycache__",
+      ".trash"
+    ]
+  },
+  "// dataDir": "数据目录（看板、词单、向量、上传的录音…）。不写这一项 = 用仓库内的 server/data（默认）；写空串不等于默认（空串会让相对路径落到进程 cwd），要挪盘就填绝对路径"
+}

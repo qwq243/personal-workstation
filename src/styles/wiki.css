@@ -1,0 +1,382 @@
+/**
+ * 知识库模块的共享样式。
+ *
+ * 为什么单列一份：8 个界面共用一套基础件（卡片 / 表格 / 标签 / 指标卡 / 提示 / 列表），
+ * 各写一份的下场是「同一个卡片在不同页圆角、内边距、字号都不一样」—— 那正是要修的问题。
+ *
+ * 规矩：颜色字号间距一律引用 tokens.css 的变量，不出现硬编码色值；
+ * 只在这里定「知识库内部一致的观感」，页面特有的布局仍写在各组件里。
+ *
+ * **2026-09-26 对齐每日看板**：知识库原先自成一版观感（卡片顶一条 3px 色条、
+ * 指标卡 26px 数字压左、圆形大标签、卡片标题前置竖条），跟全站其它页放一起像另一个应用。
+ * 现在这套基础件改成与「每日看板」同一套语言：
+ *   · 卡片 = `ws-card`（16px 圆角 + 1px 描边 + 一层极浅阴影）+ `padding: 16px 18px`；
+ *   · 卡片头 = 图标 + 14px/650 标题（不再用前置竖条，改用图标，与看板 block__title 一致）；
+ *   · 指标卡 = 看板的 KPI 卡：小字标签（12px 灰）→ 大号强调数字（28px 主色）→ 脚注（11.5px 更浅）；
+ *   · 间距：卡片之间 18px（看板正是 18），卡内元素 12px；
+ *   · 空档/说明一律走 `.wk-hint`（= 看板 `.muted-line` 的 13px 灰），不再有第三种写法。
+ * 类名保持 `wk-*` 不动 —— 8 个界面都在用，改名只会制造无谓的 diff。
+ */
+
+/* 页面容器：所有知识库子页共用的纵向节奏与留白。
+ *
+ * 与 `.ws-page` 同款（28px 上 / 32px 侧 / 72px 下），只在最大宽度上取「宽」档：
+ * 知识库有图谱和三栏阅读器，1120 会把画布挤窄。
+ * 顶部多出的 6px 与库信息条之间靠 .libbar 自己再压一点，省得缝看着比内容还宽。 */
+.wk-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 28px 32px 72px;
+}
+
+/* 嵌在别的面板里的内容块：同样的纵向节奏，但**不带全页留白**
+   （那种留白属于最外层的 .wk-page；嵌进去再带一次就会「缝套缝」） */
+.wk-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------ 卡片 --- */
+
+.wk-card {
+  padding: 16px 18px;
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-border);
+  border-radius: var(--ws-radius-lg);
+  box-shadow: var(--ws-shadow-1);
+}
+.wk-card--flush {
+  padding: 0;
+  overflow: hidden;
+}
+.wk-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.wk-card--flush .wk-card__head {
+  margin: 0;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--ws-border);
+}
+.wk-card__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ws-text);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+/* 标题里的图标跟看板一样吃主色，一眼能认出「这是哪张卡」（模板里给 <el-icon> 才有） */
+.wk-card__title .el-icon {
+  color: var(--ws-accent);
+  font-size: 15px;
+}
+.wk-card__desc {
+  margin: 0 0 12px;
+  font-size: var(--ws-fs-xs);
+  line-height: 1.8;
+  color: var(--ws-text-3);
+}
+.wk-card__desc code,
+.wk-mono {
+  font-family: var(--ws-mono);
+}
+
+/* 布局：两栏 / 侧栏 + 主区 */
+.wk-cols {
+  display: grid;
+  gap: 18px;
+  align-items: start;
+}
+.wk-cols--2 {
+  grid-template-columns: 1fr 1fr;
+}
+.wk-cols--2-1 {
+  grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr);
+}
+.wk-cols--side {
+  grid-template-columns: minmax(220px, 290px) minmax(0, 1fr);
+}
+@media (max-width: 980px) {
+  .wk-cols--2,
+  .wk-cols--2-1,
+  .wk-cols--side {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------------------------------------------------ 指标 ---
+   一张指标卡 = 标签 / 数字 / 脚注，与看板顶部的 KPI 卡同一套读法。
+   数字用模块专属色（`--wk-stat-color`）而不是统一主色：知识库六类页面
+   （概念/实体/来源/…）要能一眼分开，全站也只有这里的统计数字允许带模块色。 */
+
+.wk-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.wk-stat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 16px;
+  min-width: 0;
+  text-align: left;
+  font: inherit;
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-border);
+  border-radius: var(--ws-radius-lg);
+  box-shadow: var(--ws-shadow-1);
+  cursor: pointer;
+  transition: border-color 0.14s ease, transform 0.14s ease, box-shadow 0.14s ease;
+}
+.wk-stat:hover {
+  border-color: var(--wk-stat-color, var(--ws-accent));
+  transform: translateY(-2px);
+  box-shadow: var(--ws-shadow-2);
+}
+.wk-stat__label {
+  font-size: var(--ws-fs-xs);
+  color: var(--ws-text-2);
+}
+.wk-stat__n {
+  font-size: 28px;
+  font-weight: 750;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--wk-stat-color, var(--ws-accent));
+  font-variant-numeric: tabular-nums;
+}
+.wk-stat__hint {
+  font-size: 11.5px;
+  color: var(--ws-text-3);
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------ 标签 --- */
+
+.wk-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+/* 小标签：形态对齐看板 AI 卡上的「昨天 / 今天」那种胶囊 —— 白底压一层浅灰，
+   不是实色块，免得一屏标签把正文压掉。 */
+.wk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--ws-text-3);
+  background: var(--ws-panel-2);
+  border: 1px solid var(--ws-border);
+  border-radius: var(--ws-radius-pill);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wk-chip i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ws-text-3);
+}
+.wk-chip:hover {
+  color: var(--ws-text);
+  border-color: var(--ws-border-strong);
+}
+.wk-chip.is-on {
+  color: var(--ws-accent);
+  background: var(--ws-accent-soft);
+  border-color: transparent;
+}
+.wk-chip.is-static {
+  cursor: default;
+}
+.wk-chip--warn {
+  color: var(--ws-warn);
+  background: var(--ws-warn-soft);
+  border-color: transparent;
+}
+.wk-chip--ok {
+  color: var(--ws-success);
+  background: var(--ws-success-soft);
+  border-color: transparent;
+}
+
+/* 可点的文字按钮（表格里、行尾用） */
+.wk-link {
+  font: inherit;
+  font-size: var(--ws-fs-sm);
+  color: var(--ws-accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.wk-link:hover {
+  text-decoration: underline;
+}
+.wk-link--warn {
+  color: var(--ws-warn);
+}
+
+/* ------------------------------------------------------------ 表格 --- */
+
+.wk-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ws-fs-sm);
+}
+.wk-table th {
+  text-align: left;
+  padding: 0 10px 8px;
+  font-size: var(--ws-fs-xs);
+  font-weight: 500;
+  color: var(--ws-text-3);
+  border-bottom: 1px solid var(--ws-border);
+  white-space: nowrap;
+}
+.wk-table td {
+  padding: 9px 10px;
+  color: var(--ws-text-2);
+  border-bottom: 1px solid var(--ws-border);
+  vertical-align: top;
+  line-height: 1.7;
+}
+.wk-table tr:last-child td {
+  border-bottom: none;
+}
+.wk-table tbody tr:hover td {
+  background: var(--ws-panel-2);
+}
+.wk-table .wk-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.wk-ellipsis {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------ 列表 ---
+   行与行之间一条极浅分隔线，跟看板的「待办」列表同一种读法（不是一叠小卡片）。 */
+
+.wk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wk-list__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-radius: 0;
+  font-size: var(--ws-fs-sm);
+  color: var(--ws-text-2);
+  border: none;
+  border-top: 1px solid var(--ws-border);
+  background: none;
+  text-align: left;
+  font-family: inherit;
+  width: 100%;
+}
+.wk-list__row:first-child {
+  border-top: none;
+}
+button.wk-list__row {
+  cursor: pointer;
+  transition: color 0.14s ease;
+}
+button.wk-list__row:hover {
+  color: var(--ws-accent);
+}
+.wk-list__row.is-active {
+  color: var(--ws-accent);
+  font-weight: 600;
+}
+.wk-list__main {
+  min-width: 0;
+  flex: 1;
+}
+.wk-list__title {
+  display: block;
+  font-weight: 600;
+  color: var(--ws-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wk-list__row.is-active .wk-list__title,
+button.wk-list__row:hover .wk-list__title {
+  color: var(--ws-accent);
+}
+.wk-list__meta {
+  display: block;
+  font-size: var(--ws-fs-xs);
+  color: var(--ws-text-3);
+  margin-top: 1px;
+}
+.wk-list__tail {
+  flex: 0 0 auto;
+  font-size: var(--ws-fs-xs);
+  color: var(--ws-text-3);
+  font-variant-numeric: tabular-nums;
+}
+.wk-scroll {
+  max-height: 52vh;
+  overflow: auto;
+}
+
+/* 提示与空档：一种写法（看板叫 muted-line），13px 灰字，靠行距分条。 */
+.wk-hint {
+  margin: 0;
+  font-size: var(--ws-fs-sm);
+  line-height: 1.75;
+  color: var(--ws-text-3);
+  padding: 4px 0;
+}
+.wk-hint + .wk-hint {
+  margin-top: 4px;
+}
+.wk-hint--warn {
+  color: var(--ws-warn);
+}
+.wk-hint--ok {
+  color: var(--ws-success);
+}
+.wk-empty {
+  padding: 48px 20px;
+  text-align: center;
+  font-size: var(--ws-fs-sm);
+  color: var(--ws-text-3);
+}
+
+/* 正文里的相对图片（云端解析抽出的图） */
+.wk-img {
+  display: block;
+  max-width: 100%;
+  margin: 10px 0;
+  border: 1px solid var(--ws-border);
+  border-radius: var(--ws-radius-sm);
+  background: var(--ws-panel-2);
+}

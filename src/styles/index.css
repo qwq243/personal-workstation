@@ -1,0 +1,182 @@
+/* ============================================================================
+   工作站 · 全局样式（reset / 工具类 / 动效 / EP 微调）
+   设计令牌统一定义在 ./tokens.css —— 加变量去那里，这里不放颜色值。
+   规范文档：docs/design-system.md
+   ========================================================================== */
+@import './tokens.css';
+
+/* ---------------------------------------------------------------- reset -- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--ws-font);
+  font-size: var(--ws-fs-base);
+  line-height: 1.6;
+  color: var(--ws-text);
+  background-color: var(--ws-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+p,
+figure {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+}
+
+::selection {
+  background: var(--ws-accent-ring);
+}
+
+/* 细滚动条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ws-border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--ws-border-strong);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--ws-text-3);
+  background-clip: content-box;
+}
+
+/* ------------------------------------------------------- 工具 / 原子类 -- */
+.ws-page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 28px 32px 72px;
+}
+
+.ws-page--wide {
+  max-width: 1320px;
+}
+
+.ws-page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.ws-title {
+  font-size: var(--ws-fs-lg);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ws-subtitle {
+  color: var(--ws-text-2);
+  font-size: var(--ws-fs-sm);
+  margin-top: 5px;
+}
+
+.ws-card {
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-border);
+  border-radius: var(--ws-radius-lg);
+  box-shadow: var(--ws-shadow-1);
+}
+
+.ws-muted {
+  color: var(--ws-text-2);
+}
+
+.ws-dim {
+  color: var(--ws-text-3);
+}
+
+.ws-mono {
+  font-family: var(--ws-mono);
+}
+
+.ws-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ws-spacer {
+  flex: 1;
+}
+
+.ws-empty {
+  padding: 56px 20px;
+  text-align: center;
+  color: var(--ws-text-3);
+}
+
+/* ------------------------------------------------------------- 动画 ---- */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ------------------------------------------- Element Plus 局部对齐微调 --
+   颜色令牌已在 tokens.css 全量映射（含深色），这里只留形状与字重。 */
+.el-card,
+.el-dialog,
+.el-drawer {
+  --el-border-radius-base: var(--ws-radius);
+}
+
+.el-button {
+  font-weight: 500;
+}

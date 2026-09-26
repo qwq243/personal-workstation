@@ -1,0 +1,273 @@
+/* ============================================================================
+   工作站 · 设计令牌（Design Tokens）—— 全站唯一视觉事实源
+   规范文档：docs/design-system.md
+   调性：清爽理性 · 内容优先 · 轻量现代；品牌主色靛蓝 #4F46E5。
+   规则：
+   - 组件样式只允许引用这里的变量，禁止在 .vue 里写新的硬编码颜色。
+   - 模块专属色（学习/待办/教务）仅用于卡片描边、徽标、统计数字点缀。
+   ========================================================================== */
+
+:root {
+  /* ---------------------------------------------------------- 品牌主色 -- */
+  --ws-accent-50: #eef2ff;
+  --ws-accent-100: #e0e7ff;
+  --ws-accent-200: #c7d2fe;
+  --ws-accent-300: #a5b4fc;
+  --ws-accent-400: #818cf8;
+  --ws-accent-600: #4f46e5;
+  --ws-accent: #4f46e5; /* 主色 */
+  --ws-accent-hover: #4338ca;
+  --ws-accent-deep: #3730a3;
+  --ws-accent-soft: #eef2ff;
+  --ws-accent-ring: rgba(79, 70, 229, 0.18);
+  --ws-accent-grad-end: #818cf8; /* 品牌渐变末端（logo / 强调渐变） */
+  --ws-on-accent: #ffffff; /* 压在主色实底上的前景色 */
+  --ws-on-solid: #ffffff; /* 压在语义色实底上的前景色（成功/危险等） */
+
+  /* ---------------------------------------------------------- 语义色 ---- */
+  --ws-success: #16a34a;
+  --ws-success-soft: #ecfdf3;
+  --ws-warn: #d97706;
+  --ws-warn-soft: #fffbeb;
+  --ws-danger: #dc2626;
+  --ws-danger-soft: #fef2f2;
+  --ws-info: #0ea5e9;
+  --ws-info-soft: #f0f9ff;
+
+  /* ---------------------------------------------------------- 中性色 ---- */
+  --ws-bg: #f4f5f9;
+  --ws-bg-grid: rgba(15, 23, 42, 0.035);
+  --ws-panel: #ffffff;
+  --ws-panel-2: #fafbfd;
+  --ws-sidebar: #ffffff;
+  --ws-border: #e6e8f0;
+  --ws-border-strong: #d5d9e6;
+
+  --ws-text: #1c2033;
+  --ws-text-2: #5b6178;
+  --ws-text-3: #8b90a5;
+
+  /* ---------------------------------------------------------- 字号标尺 -- */
+  --ws-fs-xs: 12px; /* 说明文字 */
+  --ws-fs-sm: 13px; /* 辅助文字 */
+  --ws-fs-base: 14px; /* 正文基准 */
+  --ws-fs-md: 16px; /* 卡片标题 */
+  --ws-fs-lg: 20px; /* 区块/页面标题 */
+  --ws-fs-xl: 28px; /* 页面大标题（hero） */
+
+  /* ---------------------------------------------------------- 间距尺度 -- */
+  --ws-space-1: 4px;
+  --ws-space-2: 8px;
+  --ws-space-3: 12px;
+  --ws-space-4: 16px;
+  --ws-space-5: 20px;
+  --ws-space-6: 24px;
+  --ws-space-8: 32px;
+  --ws-space-10: 40px;
+  --ws-space-14: 56px;
+
+  /* ---------------------------------------------------------- 圆角 ------ */
+  --ws-radius-sm: 8px;
+  --ws-radius: 12px;
+  --ws-radius-lg: 16px;
+  --ws-radius-pill: 999px;
+
+  /* ---------------------------------------------------------- 阴影层级 -- */
+  --ws-shadow-1: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --ws-shadow-2: 0 4px 16px -4px rgba(16, 24, 40, 0.1), 0 2px 6px -2px rgba(16, 24, 40, 0.05);
+  --ws-shadow-3: 0 18px 48px -12px rgba(16, 24, 40, 0.22);
+  /* 旧名别名，存量代码逐步迁移后删除 */
+  --ws-shadow-sm: var(--ws-shadow-1);
+  --ws-shadow: var(--ws-shadow-2);
+  --ws-shadow-lg: var(--ws-shadow-3);
+
+  /* ---------------------------------------------- 模块专属色（点缀用） -- */
+  --ws-module-growth: #166534;
+  --ws-module-office: #0f766e;
+  --ws-module-study: #4f46e5;
+  --ws-module-todo: #0ea5e9;
+  --ws-module-campus: #8b5cf6;
+
+  /* ------------------------------------------------- 日历课程色阶 ------
+     日历里同一门课要一眼认出、不同课要能区分，所以给 8 组「软底 + 前景」。
+     取 8 而不是 6：一个学期的课表通常 6~10 门，6 组必然撞色（实测两门同时段的课
+     拿到同一色）；8 组能让 ≤8 门课两两不同。
+     取色原则：低饱和软底 + 同色相深前景，浅色下不刺眼、深色下不发光；
+     只用于课程块，不进任何其它组件。 */
+  --ws-cal-1: #eef2ff; --ws-cal-1-fg: #4338ca;
+  --ws-cal-2: #ecfeff; --ws-cal-2-fg: #0e7490;
+  --ws-cal-3: #ecfdf5; --ws-cal-3-fg: #047857;
+  --ws-cal-4: #fffbeb; --ws-cal-4-fg: #b45309;
+  --ws-cal-5: #fef2f2; --ws-cal-5-fg: #b91c1c;
+  --ws-cal-6: #f5f3ff; --ws-cal-6-fg: #6d28d9;
+  --ws-cal-7: #f1f5f9; --ws-cal-7-fg: #334155;
+  --ws-cal-8: #fdf2f8; --ws-cal-8-fg: #be185d;
+
+  /* ---------------------------------------------------------- 字体 ------ */
+  --ws-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  --ws-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+
+  --ws-sidebar-w: 236px;
+  --ws-header-h: 60px;
+
+  color-scheme: light;
+}
+
+/* ------------------------------------------- Element Plus 令牌映射 ----
+   必须挂在 html[data-theme='light'] 而不是 :root：
+   EP 组件 chunk 的 css-vars 也是 :root 且按需后加载，同优先级会被后加载盖掉；
+   html[data-theme='light'] 优先级 (0,1,1) 高于 :root (0,1,0)，与加载顺序无关。
+   （深色映射同理，在下方 html[data-theme='dark'] 块内。） */
+html[data-theme='light'] {
+  --el-font-family: var(--ws-font);
+  --el-font-size-base: var(--ws-fs-base);
+  --el-border-radius-base: var(--ws-radius-sm);
+  --el-border-radius-small: 6px;
+  --el-border-radius-round: var(--ws-radius-pill);
+
+  --el-color-primary: var(--ws-accent);
+  --el-color-primary-dark-2: #3f38b7;
+  --el-color-primary-light-3: #847eed;
+  --el-color-primary-light-5: #a7a3f2;
+  --el-color-primary-light-7: #cac8f7;
+  --el-color-primary-light-8: #dcdafa;
+  --el-color-primary-light-9: #edecfc;
+
+  --el-color-success: var(--ws-success);
+  --el-color-success-dark-2: #12823b;
+  --el-color-success-light-8: #d0eddb;
+  --el-color-success-light-9: #e7f6ed;
+  --el-color-warning: var(--ws-warn);
+  --el-color-warning-dark-2: #ae5f05;
+  --el-color-warning-light-8: #f2e7cc;
+  --el-color-warning-light-9: #f6f3e6;
+  --el-color-danger: var(--ws-danger);
+  --el-color-danger-dark-2: #b01e1e;
+  --el-color-danger-light-8: #f6d7d7;
+  --el-color-danger-light-9: #fbecec;
+  --el-color-error: var(--ws-danger);
+  --el-color-error-dark-2: #b01e1e;
+  --el-color-error-light-8: #f6d7d7;
+  --el-color-error-light-9: #fbecec;
+  --el-color-info: #64748b;
+  --el-color-info-dark-2: #505d6f;
+  --el-color-info-light-8: #e0e3e6;
+  --el-color-info-light-9: #f0f1f3;
+
+  --el-text-color-primary: var(--ws-text);
+  --el-text-color-regular: var(--ws-text-2);
+  --el-text-color-secondary: var(--ws-text-3);
+  --el-text-color-placeholder: var(--ws-text-3);
+  --el-border-color: var(--ws-border-strong);
+  --el-border-color-light: var(--ws-border);
+  --el-border-color-lighter: var(--ws-border);
+  --el-border-color-extra-light: var(--ws-panel-2);
+  --el-bg-color: var(--ws-panel);
+  --el-bg-color-page: var(--ws-bg);
+  --el-bg-color-overlay: var(--ws-panel);
+  --el-fill-color: #eef0f6;
+  --el-fill-color-light: #f4f5f9;
+  --el-fill-color-lighter: var(--ws-panel-2);
+  --el-fill-color-blank: var(--ws-panel);
+  --el-mask-color: rgba(16, 24, 40, 0.5);
+}
+
+/* ============================================================== 深色 ===== */
+html[data-theme='dark'] {
+  --ws-accent: #7c83ff;
+  --ws-accent-hover: #6f76ff;
+  --ws-accent-deep: #a5aaff;
+  --ws-accent-soft: #1e2140;
+  --ws-accent-ring: rgba(124, 131, 255, 0.25);
+
+  --ws-success: #34d399;
+  --ws-success-soft: #10251d;
+  --ws-warn: #fbbf24;
+  --ws-warn-soft: #2a2011;
+  --ws-danger: #f87171;
+  --ws-danger-soft: #2a1618;
+  --ws-info: #38bdf8;
+  --ws-info-soft: #0c2233;
+
+  --ws-bg: #0f1117;
+  --ws-bg-grid: rgba(255, 255, 255, 0.028);
+  --ws-panel: #171a23;
+  --ws-panel-2: #1c2029;
+  --ws-sidebar: #141721;
+  --ws-border: #262b36;
+  --ws-border-strong: #333a49;
+
+  --ws-text: #e8eaf2;
+  --ws-text-2: #a5abbd;
+  --ws-text-3: #767d92;
+
+  --ws-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --ws-shadow-2: 0 6px 20px -6px rgba(0, 0, 0, 0.6);
+  --ws-shadow-3: 0 20px 50px -14px rgba(0, 0, 0, 0.75);
+
+  --ws-module-growth: #4ade80;
+  --ws-module-office: #2dd4bf;
+  --ws-module-study: #818cf8;
+  --ws-module-todo: #38bdf8;
+  --ws-module-campus: #a78bfa;
+
+  /* 日历课程色阶（深色）：软底压深，前景提亮，保证在深底上可读 */
+  --ws-cal-1: #1e2140; --ws-cal-1-fg: #a5b4fc;
+  --ws-cal-2: #0c2b33; --ws-cal-2-fg: #67e8f9;
+  --ws-cal-3: #0f2a20; --ws-cal-3-fg: #6ee7b7;
+  --ws-cal-4: #2b2312; --ws-cal-4-fg: #fcd34d;
+  --ws-cal-5: #2b1618; --ws-cal-5-fg: #fca5a5;
+  --ws-cal-6: #211b3a; --ws-cal-6-fg: #c4b5fd;
+  --ws-cal-7: #1e2630; --ws-cal-7-fg: #cbd5e1;
+  --ws-cal-8: #2a1622; --ws-cal-8-fg: #f9a8d4;
+
+  color-scheme: dark;
+
+  /* EP 深色主色：light-N 在深色下按「掺黑」理解（软底/边框），dark-2 为 hover */
+  --el-color-primary: var(--ws-accent);
+  --el-color-primary-dark-2: #969cff;
+  --el-color-primary-light-3: #575cb3;
+  --el-color-primary-light-5: #3e4280;
+  --el-color-primary-light-7: #25274d;
+  --el-color-primary-light-8: #191a33;
+  --el-color-primary-light-9: #0c0d1a;
+
+  --el-color-success: var(--ws-success);
+  --el-color-success-dark-2: #7fe8a4;
+  --el-color-success-light-8: #14301f;
+  --el-color-success-light-9: #122a1b;
+  --el-color-warning: var(--ws-warn);
+  --el-color-warning-dark-2: #f8cd5c;
+  --el-color-warning-light-8: #33290f;
+  --el-color-warning-light-9: #2a2110;
+  --el-color-danger: var(--ws-danger);
+  --el-color-danger-dark-2: #fa9393;
+  --el-color-danger-light-8: #331818;
+  --el-color-danger-light-9: #2a1515;
+  --el-color-error: var(--ws-danger);
+  --el-color-error-dark-2: #fa9393;
+  --el-color-error-light-8: #331818;
+  --el-color-error-light-9: #2a1515;
+  --el-color-info: #94a3b8;
+  --el-color-info-dark-2: #adb9ca;
+  --el-color-info-light-8: #262b31;
+  --el-color-info-light-9: #22262b;
+
+  --el-text-color-primary: var(--ws-text);
+  --el-text-color-regular: var(--ws-text-2);
+  --el-text-color-secondary: var(--ws-text-3);
+  --el-text-color-placeholder: var(--ws-text-3);
+  --el-border-color: var(--ws-border-strong);
+  --el-border-color-light: var(--ws-border);
+  --el-border-color-lighter: var(--ws-border);
+  --el-border-color-extra-light: var(--ws-panel-2);
+  --el-bg-color: var(--ws-panel);
+  --el-bg-color-page: var(--ws-bg);
+  --el-bg-color-overlay: var(--ws-panel-2);
+  --el-fill-color: #262b36;
+  --el-fill-color-light: #1c2029;
+  --el-fill-color-lighter: var(--ws-panel-2);
+  --el-fill-color-blank: var(--ws-panel);
+  --el-mask-color: rgba(0, 0, 0, 0.6);
+}

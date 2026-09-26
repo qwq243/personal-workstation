@@ -1,0 +1,32 @@
+/**
+ * 语音随记（`#/memo`）。
+ *
+ * 命名沿用本站惯例：页面名用中文（语音随记），id / 文件名用英文领域名
+ * （memo ↔ `server/lib/memo.mjs`、`/api/memo/*`、`#/memo`）。
+ *
+ * 为什么不叫「个人访谈」：用户的用法是「随手说一段、让它自己整理成一条记录」，
+ * 访谈只是其中一种场景，随记更贴。
+ */
+import type { WorkstationModule } from '@/core/types'
+import { cfgFilled, cfgGet } from '@/core/appconfig'
+
+export const memoModule: WorkstationModule = {
+  id: 'memo',
+  name: '语音随记',
+  description: '传一段录音，自动转成文字并起标题、写摘要，存成一条可回看的记录。',
+  icon: 'Microphone',
+  color: '#e11d48',
+  category: 'office',
+  order: 26,
+  homePath: '/memo',
+  /** 转写后端没配就不显示（「没配 = 不显示」是内核约定，见 core/appconfig.ts） */
+  visible: () => cfgGet('asr.provider') !== 'none' && cfgFilled('asr.baseUrl'),
+  routes: [
+    {
+      path: '/memo',
+      name: 'memo',
+      component: () => import('./MemoView.vue'),
+      meta: { title: '语音随记', icon: 'Microphone', hideInNav: true },
+    },
+  ],
+}
