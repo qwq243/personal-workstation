@@ -1,5 +1,7 @@
 # 工作站 Workstation（开源版）
 
+[![CI](https://github.com/qwq243/personal-workstation/actions/workflows/ci.yml/badge.svg)](https://github.com/qwq243/personal-workstation/actions/workflows/ci.yml)
+
 **一句话**：一个跑在自己电脑上的个人工作台 —— Vue 3 页面 + 一个只监听 `127.0.0.1` 的本地边车（Node，只用内置模块），功能以「模块」为单位插拔。
 
 **一段话**：前端是「内核 + 功能模块」的结构。内核（`src/core/`、`src/router/`、`src/shell/`）负责路由、侧边栏、存储、主题与边车客户端；每个功能自己一个目录（`src/features/<名字>/`），通过 `module.ts`（一个目录装多个模块时用 `<id>.module.ts`）向 `src/core/registry.ts` 登记自己（id / 名称 / 图标 / 路由 / 可选的可见性钩子）—— **侧边栏、首页卡片、路由表全部由这张注册表派生**，所以加功能**不需要改 `src/core/`、`src/router/`、`src/shell/`**。但「不用改内核」不等于「一个文件都不用动」：新图标要在 `src/main.ts` 的白名单里加**两处**（import 与 `ICONS` 映射，漏了不报错、只表现成那块图标是空白），后端能力要在边车的 `server/lib/*.mjs` 里写、再在 `server/index.mjs` 里挂一条 `/api/*`。完整清单（纯页面 / +接口 / +配置 / +MCP 各动几个文件）见 [docs/EXTENDING.md §2](docs/EXTENDING.md)。边车存在的三个理由：绕开浏览器的 CORS、把密钥留在浏览器之外、做浏览器做不到的本机操作（扫进程、读端口、写启动项、起子进程）。它只监听回环地址，并且有两道闸：**Origin 白名单 + 本地令牌**。

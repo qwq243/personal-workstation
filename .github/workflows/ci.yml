@@ -24,9 +24,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           # 与 package.json 的 `engines: >=22.6` 对齐：
           # `npm run test:parity` 用了 `--experimental-strip-types`，Node 22.6 才有。
