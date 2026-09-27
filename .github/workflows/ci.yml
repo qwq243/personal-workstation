@@ -1,7 +1,13 @@
 name: CI
 
 # 每次往 main 推、以及每个 PR 都跑：装依赖 → 类型检查 → 纯逻辑测试 → 对拍 → 构建。
-#
+# 也可以在 Actions 页手动触发（workflow_dispatch）。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
 # 为什么是两个平台（matrix）：
 #   · 页面与纯逻辑这几步是**真的跨平台**（README「环境要求」那张表把它们和「只在 Windows 可用」
 #     的那一半分开了），CI 正好替这句话作证；
