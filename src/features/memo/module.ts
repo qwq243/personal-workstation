@@ -21,7 +21,13 @@ export const memoModule: WorkstationModule = {
       path: '/memo',
       name: 'memo',
       component: () => import('./MemoView.vue'),
-      meta: { title: '语音随记', icon: 'Microphone', hideInNav: true },
+      meta: { title: '随记', icon: 'Microphone', hideInNav: true },
+    },
+    {
+      path: '/memo/hotwords',
+      name: 'memo-hotwords',
+      component: () => import('./MemoHotwordsView.vue'),
+      meta: { title: '热词', icon: 'Notebook' },
     },
   ],
 }

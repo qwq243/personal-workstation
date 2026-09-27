@@ -16,7 +16,8 @@
  * 数据落 server/data/memo/：
  *   records.json             记录索引（createJsonStore，原子写 + .bak + 按天快照）
  *   records/<日期>-<slug>.md 单条记录的可读正文（摘要 + 原文）
- *   inbox/                   上传进来的原始音频（转写完不删，留着方便重跑）
+ *   inbox/                   上传进来的原始音频（转写完不删，留着回放/重跑）
+ *   hotwords.json            热词库：分类 → 词（词 + 常见错写别名），见 hotwords.mjs
  *   jobs.json                任务快照（边车重启后把死掉的 running 标 interrupted）
  *
  * 边界：不做录屏；不自动入知识库（页面给「复制 Markdown」）。
@@ -24,6 +25,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { loadConfig, dataDir } from '../config.mjs'
+import * as hotwords from './hotwords.mjs'
 import { createJsonStore, todayStr } from './jsonstore.mjs'
 import { aiModels } from './newapi.mjs'
 import { chatGuarded, chatStreamGuarded } from './llm.mjs'
@@ -44,7 +46,7 @@ const KEEP_JOBS = 50
 
 const SETTINGS_FILE = () => path.join(MEMO_DIR(), 'settings.json')
 
-/** 页面选的总结模型（空 = 跟随「设置 → 模型」的 chat 预设）+ 自定义提示词 */
+/** 页面选项：总结模型 / 自定义提示词 / 记录类型 / 默认热词分类 / 自动学新词 */
 function settings() {
   try {
     const raw = JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf-8'))
@@ -52,11 +54,17 @@ function settings() {
     return {
       ...(raw && typeof raw === 'object' ? raw : {}),
       model: typeof raw?.model === 'string' ? raw.model : '',
+      type: raw?.type === 'interview' ? 'interview' : 'oral',
+      hotwordCategories: Array.isArray(raw?.hotwordCategories) ? raw.hotwordCategories.map(String) : [],
+      autoHotwords: raw?.autoHotwords !== false,
     }
   } catch {
-    return { model: '' }
+    return { model: '', type: 'oral', hotwordCategories: [], autoHotwords: true }
   }
 }
+
+// 词库空的时候先铺几个起步分类，否则开局一个可用的词都没有
+hotwords.ensureSeeded()
 
 function writeSettings(next) {
   try {
@@ -88,6 +96,34 @@ export function setModel(model) {
   }
   writeSettings({ ...settings(), model: clean })
   return { ok: true, model: clean, ...models() }
+}
+
+/** 记录类型 / 默认热词分类 / 自动学词 —— 页面上的几个开关 */
+export function options() {
+  const s = settings()
+  return { type: s.type, hotwordCategories: s.hotwordCategories, autoHotwords: s.autoHotwords }
+}
+
+export function setOptions(patch = {}) {
+  const s = settings()
+  const next = { ...s }
+  if ('type' in patch) next.type = patch.type === 'interview' ? 'interview' : 'oral'
+  if ('hotwordCategories' in patch) {
+    next.hotwordCategories = (Array.isArray(patch.hotwordCategories) ? patch.hotwordCategories : [])
+      .map((x) => String(x ?? '').trim())
+      .filter(Boolean)
+      .slice(0, 8)
+  }
+  if ('autoHotwords' in patch) next.autoHotwords = patch.autoHotwords !== false
+  writeSettings(next)
+  return { ok: true, options: options() }
+}
+
+/** 一次整理要用的词表：页面选定的分类（空 = 全部，让模型自己挑） */
+function activeTerms(refs) {
+  const wanted = (refs ?? []).filter(Boolean)
+  if (!wanted.length) return hotwords.termsOf(hotwords.list().categories.map((cat) => cat.id))
+  return hotwords.termsOf(wanted)
 }
 
 /** 显式传的模型优先，其次页面选的，最后交给 config 的默认（返回 undefined） */
@@ -126,10 +162,17 @@ function brief(record) {
     startedAt: record.startedAt,
     endedAt: record.endedAt,
     device: record.device,
+    type: record.type ?? 'oral',
     tags: record.tags ?? [],
+    categoryId: record.categoryId ?? '',
+    categoryName: record.categoryName ?? '',
     sections: (record.sections ?? []).map((s) => ({ key: s.key, title: s.title, items: s.items?.length ?? 0 })),
     stageSummaries: (record.liveSummaries ?? []).length,
     parts: (record.parts ?? []).length,
+    hotwords: record.hotwords ?? [],
+    newTerms: record.newTerms ?? [],
+    /** 有原始音频才能回放（上传的音频留在 inbox/，见 audioStream） */
+    audio: record.file && fs.existsSync(record.file) ? { bytes: fs.statSync(record.file).size } : null,
   }
 }
 
@@ -282,7 +325,7 @@ export function jobStatus(id) {
  *
  * @param {{ path: string, name?: string, source?: string }} opts
  */
-export function startTranscribe({ path: file, name, source = 'web' } = {}) {
+export function startTranscribe({ path: file, name, source = 'web', type, category, focus } = {}) {
   const st = asrStatus()
   if (!st.configured) return { ok: false, error: st.reason }
   const abs = String(file ?? '').trim()
@@ -296,6 +339,10 @@ export function startTranscribe({ path: file, name, source = 'web' } = {}) {
     file: abs,
     name: String(name || path.basename(abs)),
     source,
+    /** 这次按什么类型整理（口述/访谈）与想理清的重点，转写完成后一起交给整理那一步 */
+    type: type === 'interview' ? 'interview' : undefined,
+    category: String(category ?? '').trim() || undefined,
+    focus: String(focus ?? '').slice(0, 2000),
     startedAt: Date.now(),
     endedAt: null,
     chars: 0,
@@ -332,6 +379,9 @@ async function runJob(job) {
   job.model = r.model ?? null
   job.asrMs = r.ms ?? null
 
+  const opts = settings()
+  const picked = job.category ? hotwords.findCategory(job.category) : null
+  const base = activeTerms(picked ? [picked.id] : opts.hotwordCategories)
   const record = {
     id: job.id,
     title: '',
@@ -350,6 +400,16 @@ async function runJob(job) {
     liveSummary: '',
     liveSummaries: [],
     model: null,
+    type: job.type === 'interview' ? 'interview' : opts.type,
+    /** 这次想理清的重点 / 访谈提纲（可空），成稿时用来做「问题对照」 */
+    focus: String(job.focus ?? '').slice(0, 2000),
+    categoryId: picked?.id ?? '',
+    categoryName: picked?.name ?? '',
+    suggestedCategories: [],
+    /** 这次用的词表快照：纠错、命中与自动学词都以它为准 */
+    hotwordTerms: base.terms,
+    hotwords: [],
+    newTerms: [],
   }
 
   try {
@@ -429,18 +489,25 @@ const MERGE_INSTRUCTION = [
 function partMessages(record, chunk, index, total) {
   const p = activePrompts()
   const values = {
-    transcript: timelineOf(chunk),
+    transcript: hotwords.applyAliases(timelineOf(chunk), recordTerms(record)).text,
     plain: chunk.map((seg) => String(seg.text ?? '').trim()).join('\n'),
     process: '',
     duration: humanLen(record.durationSec),
     chars: String(record.chars ?? ''),
+    hotwords: hotwords.promptBlock(recordTerms(record)),
+    categories: hotwords.list().categories.map((c) => c.name).join('、'),
+    focus: String(record.focus ?? '').trim(),
+    type: record.type === 'interview' ? '访谈' : '口述',
   }
   const preamble =
-    `（注意：这是同一份口述的第 ${index}/${total} 段，前后还有别的内容；` +
+    `（注意：这是同一份记录的第 ${index}/${total} 段，前后还有别的内容；` +
     '**只整理这一段**，把这一段的细节尽量写全，整份总稿会由各段整理合并而成。）\n\n'
   return [
-    { role: 'system', content: p.summarySystem },
-    { role: 'user', content: preamble + renderPrompt(p.summaryUser, values) },
+    { role: 'system', content: record.type === 'interview' ? p.interviewSystem : p.summarySystem },
+    {
+      role: 'user',
+      content: preamble + renderPrompt(record.type === 'interview' ? p.interviewUser : p.summaryUser, values),
+    },
   ]
 }
 
@@ -471,16 +538,19 @@ function mergeMessages(parts) {
 export const DEFAULT_PROMPTS = {
   summarySystem:
     '你在整理用户的口述记录（多半是他自己讲研究思路、设计或复盘的录音）。原文是语音转写，' +
-    '可能有同音字/错别字、缺标点、句子断裂——按上下文纠正明显错误（例如把「部署」按上下文改成「布置」），' +
+    '可能有同音字/错别字、缺标点、句子断裂——按上下文纠正明显错误（热词表里给了就该用表里的写法），' +
     '但**不要增补原文没有的信息**。\n' +
     '这份整理的用途是**当材料反复看**：宁可多留信息点，也不要压成空泛的概括；' +
     '**详细程度要跟着内容体量走**——几分钟的闲聊几句就够，十分钟以上的正经讲述必须分条展开、' +
     '把讲过的每个决定、数字、待办都留下来。不要 emoji，不要空话，不要「总之」「综上」这类填充。',
   summaryUser:
     '这是一次口述：时长 {{duration}}，转写 {{chars}} 字。\n\n' +
-    '【带时间轴的转写】\n{{transcript}}\n\n' +
-    '【录音过程中的阶段摘要】（每约 220 字自动压一次，可当作叙事线索，但**不完整**，' +
-    '缺失处以转写为准）\n{{process}}\n\n' +
+    '【热词表】——遇到表里的错写就改成表里的正名（这一条优先于你自己猜的同音字）；' +
+    '标签也优先从表里挑：\n{{hotwords}}\n\n' +
+    '【分类候选】{{categories}}（在「分类」栏里挑一个最贴的；都不合适就写「新建：<名字>」）\n\n' +
+    '【这次想理清的重点（可能没填）】{{focus}}\n\n' +
+    '【转写原文】\n{{transcript}}\n\n' +
+    '【转写过程中的阶段摘要】（可当作叙事线索，但**不完整**，缺失处以转写为准）\n{{process}}\n\n' +
     '请输出一份 Markdown 整理稿，按下面的骨架（**栏目名照抄**，不适合内容的栏目整段略去，' +
     '不要写「无」「略」）：\n\n' +
     '# 标题\n' +
@@ -489,9 +559,11 @@ export const DEFAULT_PROMPTS = {
     '**3-6 句连贯的段落**（不要用列表、不要压成一句）：先说这段口述在讲什么、分几块讲的，' +
     '再给结论或走向。这一段要能**单独拿出来读懂**，别写成「本文记录了一次口述」这种空话。\n\n' +
     '## 标签\n' +
-    '3-6 个，每个 ≤ 6 字，回答「这份记录主要讲什么」——写**主题词/关键词**' +
-    '（例如「需求」「方案」「流程」），' +
+    '3-6 个，每个 ≤ 6 字：**优先用热词表里的词**，表里没有合适的才自己写。' +
+    '要的是主题词/关键词（例如「需求」「方案」「流程」），' +
     '**不要**写「摘要」「要点」「待办」这类结构词，也不要带数字或条目数；一行一个，不要解释。\n\n' +
+    '## 分类\n' +
+    '一个分类名（从上面的候选里挑），或「新建：<名字>」。\n\n' +
     '## 讲了什么\n' +
     '按叙述顺序分条，**一条一个信息点**，把讲到的内容尽量留住（人和事、平台/系统名、' +
     '方法、数字、判断、举例都算）。内容越长条数越多，不要合并成一句概括。\n\n' +
@@ -504,12 +576,58 @@ export const DEFAULT_PROMPTS = {
     '## 风险与坑\n' +
     '他提到的隐患、失败、效果不好的地方（例如「防注入效果不太好」这种）。\n\n' +
     '## 术语与专名\n' +
-    '列表「转写里的写法 → 应该是」（只列你有把握的），把本文出现的专名/术语对齐成一套写法，' +
+    '一行一个，写成「正名 ← 转写里的错写」（只列你有把握的），把本文出现的专名/术语对齐成一套写法，' +
     '方便以后检索；顺带一句话解释它在本文里指什么。\n\n' +
     '## 时间轴\n' +
     '- [mm:ss] 关键点（回听用，只挑真正重要的 5~12 个时间点）\n\n' +
     '要求：**只写原文里有的东西**；不确定的地方标注「（听不清）」，不要猜；' +
     '不要输出 JSON、不要代码块、不要解释你在做什么、不要在开头加「好的」。',
+
+  interviewSystem:
+    '你在整理一份**访谈录音**的逐字稿（清洁逐字档：只去无意义的「呃/那个」，保留所有表达确定程度的词）。\n' +
+    '六条纪律：\n' +
+    '① 关键引语必须是**受访者原话**——只能修明显错别字与标点，不许换词、不许润色、不许把话理顺；\n' +
+    '② 「可能/一般/大概/我不太确定/看情况」是**证据**（说明他有多确定），不是口癖，一律保留；否定与自我更正（「不是 A，是 B」）保留更正后的说法；\n' +
+    '③ 严格区分「他说的」与「你的判断」：判断只写进「初步解读」栏，每条标 [推断] 并给置信度（高/中/低）+ 一条替代解释；\n' +
+    '④ 转写**没有说话人分离**：分不清谁说的就整段转述或标「（说话人不明）」，**绝不编造说话人身份**；\n' +
+    '⑤ 听不清标「（听不清）」，不确定的专名保持原样标「（待确认）」，数字/单位/日期原样——**绝不补全**；\n' +
+    '⑥ 隐私：不写真实姓名、单位、联系方式这类可识别信息，用「受访者」「老师 A」这样的代号。',
+  interviewUser:
+    '这是一次访谈：时长 {{duration}}，转写 {{chars}} 字，记录类型：{{type}}。\n\n' +
+    '【热词表】——遇到表里的错写就改成表里的正名（优先于你自己猜的同音字）：\n{{hotwords}}\n\n' +
+    '【分类候选】{{categories}}\n\n' +
+    '【研究问题 / 访谈提纲（可能没填）】\n{{focus}}\n\n' +
+    '【转写原文】\n{{transcript}}\n\n' +
+    '【转写过程中的阶段摘要】（不完整，缺失处以转写为准）\n{{process}}\n\n' +
+    '输出 Markdown 访谈整理稿（**栏目名照抄**，没有内容的整段略去，不要写「无」「略」）：\n\n' +
+    '# 标题（≤ 16 字：谁 + 谈了什么）\n\n' +
+    '## 摘要（3-6 句连贯段落：谈了哪几块、核心主张是什么、有没有结论）\n\n' +
+    '## 标签（3-6 个，每个 ≤ 6 字，优先用热词表里的词，一行一个）\n\n' +
+    '## 分类（一个分类名，或「新建：<名字>」）\n\n' +
+    '## 受访者与场景\n' +
+    '- 受访者自述的身份/背景（原话口径；没说明就写「未说明」）、访谈方式、录制时长、在场人员\n\n' +
+    '## 研究问题对照\n' +
+    '- 问题/主题 → 答得怎么样（说清楚了 / 只提一句 / 没答 / 被岔开）；上面没给提纲就按「他主动展开的话题」列\n\n' +
+    '## 关键引语\n' +
+    '- [mm:ss]「原话」—— 为什么重要（一句说明，和引语分开写）\n' +
+    '（挑 3-8 条真有信息量或情绪强度的；引语里允许带「（笑）」「（停顿）」这类现场标注；引语内部一个字都不要改）\n\n' +
+    '## 主题与编码\n' +
+    '- 主题：<主题名> —— 支撑：受访者原意（不要替他下结论）；出现：他在哪个问题下提到、本访谈内主动提了几次、语气强弱\n' +
+    '（3-6 条；一条一个主题，主题要能回答「他为什么这么想」，不是「他提到了什么」的话题桶）\n\n' +
+    '## 讲了什么（按叙述顺序的主线，5-15 条，一条一个信息点）\n\n' +
+    '## 矛盾与张力\n' +
+    '- 前后不一致、含糊回避、被追问后改口、情绪明显的地方（**保留矛盾，不要替他调和**；写清在哪一段）\n\n' +
+    '## 待追问 / 空白\n' +
+    '- 下次要问清的问题（他没展开、听出没说完、需要举例的点）；分不清的专名也列这里\n\n' +
+    '## 初步解读\n' +
+    '- [推断·置信度] 解释与假设 + 一条替代解释（必须能指回上面的材料；没把握就整段略去）\n\n' +
+    '## 术语与专名\n' +
+    '- 正名 ← 转写里的错写（对齐专名，方便以后检索）\n\n' +
+    '## 时间轴\n' +
+    '- [mm:ss] 关键点（5~15 个，回听用）\n\n' +
+    '只写材料里有的东西；不要输出 JSON 或代码块。\n' +
+    '提醒：访谈是**证据**不是素材——会议纪要那套「替人总结成决定和待办」的写法会把研究价值洗掉，别那么写。',
+
   liveSystem: '你在帮用户把正在进行中的口述记录压成一段进展。只依据原文，不编造，不用 emoji。',
   liveUser:
     '这是到目前为止的转写（可能还没说完）：\n{{transcript}}\n\n' +
@@ -535,12 +653,18 @@ function activePrompts() {
 }
 
 function renderPrompt(template, values) {
-  return String(template)
-    .replace(/\{\{\s*transcript\s*\}\}/g, values.transcript ?? '')
-    .replace(/\{\{\s*plain\s*\}\}/g, values.plain ?? '')
-    .replace(/\{\{\s*process\s*\}\}/g, values.process || '（暂无）')
-    .replace(/\{\{\s*duration\s*\}\}/g, values.duration ?? '')
-    .replace(/\{\{\s*chars\s*\}\}/g, values.chars ?? '')
+  const table = {
+    transcript: values.transcript ?? '',
+    plain: values.plain ?? '',
+    process: values.process || '（暂无）',
+    duration: values.duration ?? '',
+    chars: values.chars ?? '',
+    hotwords: values.hotwords || '（还没有热词）',
+    categories: values.categories || '（还没建分类）',
+    focus: values.focus || '（没填：按内容自己判断）',
+    type: values.type || '口述',
+  }
+  return String(template).replace(/\{\{\s*([a-z]+)\s*\}\}/g, (whole, key) => (key in table ? table[key] : whole))
 }
 
 function mmss(seconds) {
@@ -563,29 +687,292 @@ function timelineOf(segments, limit = 12_000) {
   return text.length > limit ? text.slice(-limit) : text
 }
 
+/** 这条记录该用哪套词表：记录里存的快照优先，没有就按分类现取 */
+function recordTerms(record) {
+  if (Array.isArray(record.hotwordTerms) && record.hotwordTerms.length) return record.hotwordTerms
+  if (record.categoryId) return hotwords.termsOf([record.categoryId]).terms
+  return []
+}
+
+/**
+ * 整理时的取材：能拿到逐段时间轴就用时间轴，拿不到就用整篇文本
+ * （不是所有转写后端都返回段级时间戳）；两种情况都先按热词表做一遍本地纠错。
+ */
+function finalTranscript(record) {
+  const terms = recordTerms(record)
+  const timeline = timelineOf(record.segments)
+  const body = timeline || String(record.transcript ?? '').slice(-12_000)
+  return hotwords.applyAliases(body, terms).text
+}
+
 /** 一次总结的取材（占位符替换用） */
 function promptValues(record) {
   const process = (record.liveSummaries ?? [])
     .map((item, i) => `${i + 1}. ${String(item.text ?? '').trim()}`)
     .join('\n')
+  const terms = recordTerms(record)
   return {
-    transcript: timelineOf(record.segments),
+    transcript: finalTranscript(record),
     plain: String(record.transcript ?? '').slice(-12_000),
     process,
     duration: humanLen(record.durationSec),
     chars: String(record.chars ?? String(record.transcript ?? '').length),
+    hotwords: hotwords.promptBlock(terms),
+    categories: hotwords.list().categories.map((c) => c.name).join('、'),
+    focus: String(record.focus ?? '').trim(),
+    type: record.type === 'interview' ? '访谈' : '口述',
   }
 }
 
 
-/** 总结用的两条消息（system 管态度、user 管形状） */
+/** 总结用的两条消息（system 管态度、user 管形状）；访谈与口述各一套骨架 */
 function buildSummaryMessages(record) {
   const p = activePrompts()
   const values = promptValues(record)
+  const interview = record.type === 'interview'
   return [
-    { role: 'system', content: p.summarySystem },
-    { role: 'user', content: renderPrompt(p.summaryUser, values) },
+    { role: 'system', content: interview ? p.interviewSystem : p.summarySystem },
+    { role: 'user', content: renderPrompt(interview ? p.interviewUser : p.summaryUser, values) },
   ]
+}
+
+/* --------------------------------------------------- 热词：命中、自学、标签 --- */
+
+/** 命中重算：词表里的词在这篇里出现过就算命中 */
+function refreshHits(record) {
+  const terms = recordTerms(record)
+  if (!terms.length) {
+    record.hotwords = record.hotwords ?? []
+    return record.hotwords
+  }
+  const text = `${record.transcript ?? ''}`
+  record.hotwords = terms
+    .filter((t) => t.term && text.includes(t.term))
+    .map((t) => ({ term: t.term, categoryId: record.categoryId ?? '', categoryName: record.categoryName ?? '' }))
+  return record.hotwords
+}
+
+/**
+ * 词表落地：命中记账 + 新词进分类。不额外调模型 —— 材料就是总稿里的「术语与专名」栏、标签与转写原文。
+ *
+ * 过滤故意严：模型会把「本段未出现热词表内任何专名」这种整句当术语交上来，
+ * 所以要求词形像词（长度、无句子标点与虚词）**并且**（词或它的别名）在原文里真出现过。
+ */
+export function learnHotwords(record) {
+  refreshHits(record)
+  const used = (record.hotwords ?? []).map((x) => x.term ?? x).filter(Boolean)
+  if (settings().autoHotwords === false) {
+    if (used.length) hotwords.recordHits(used)
+    return { added: [], used }
+  }
+
+  const known = new Set()
+  for (const cat of hotwords.list().categories) for (const t of cat.terms) known.add(t.term)
+  const text = String(record.transcript ?? '')
+  const seenInText = (word) => {
+    const w = String(word ?? '').trim()
+    return w.length >= 2 && text.includes(w)
+  }
+  const looksLikeTerm = (word) => {
+    const w = String(word ?? '').trim()
+    if (w.length < 2 || w.length > 16) return false
+    if (/[，。；：！？、,.;:!?（）()「」【】\s]/.test(w)) return false
+    // 带虚词的基本是句子不是词（「本段未出现热词表内任何专名」这类）
+    return !/[的了吗呢吧啊把被就是都还也而且]/i.test(w)
+  }
+  const items = []
+  const push = (item, { requireInText = true } = {}) => {
+    const term = String(item?.term ?? '').trim()
+    if (!looksLikeTerm(term) || known.has(term)) return
+    if (items.some((x) => x.term === term)) return
+    if (requireInText && !seenInText(term) && !(item.aliases ?? []).some(seenInText)) return
+    items.push({ term, aliases: item.aliases ?? [] })
+  }
+  // ① 总稿「术语与专名」栏最准：正名 ← 错写
+  for (const sec of record.sections ?? []) {
+    if (!/术语|专名/.test(String(sec.title ?? ''))) continue
+    for (const line of sec.items ?? []) push(parseTermLine(line) ?? {})
+  }
+  // ② 标签：主题词本来就可能不逐字出现在原文里，只做形状检查
+  for (const tag of record.tags ?? []) push({ term: tag }, { requireInText: false })
+
+  if (!items.length) {
+    if (used.length) hotwords.recordHits(used)
+    return { added: [], used }
+  }
+  const target = record.categoryId || ensureFallbackCategory()
+  const r = hotwords.addTerms(target, items, 'auto')
+  if (!r.ok) return { added: [], used, error: r.error }
+  const cat = hotwords.list().categories.find((c) => c.id === target)
+  record.categoryId = record.categoryId || target
+  record.categoryName = record.categoryName || cat?.name || ''
+  record.newTerms = items.map((x) => ({ term: x.term, aliases: x.aliases, categoryId: target, categoryName: cat?.name ?? '' }))
+  for (const item of record.newTerms) if (text.includes(item.term)) record.hotwords.push(item)
+  hotwords.recordHits(record.hotwords.map((x) => x.term))
+  return { added: record.newTerms, used, categoryName: cat?.name ?? '' }
+}
+
+/** 没有分类的记录：新词先进「未分类」，页面里能再挪走 */
+function ensureFallbackCategory() {
+  const found = hotwords.findCategory('未分类')
+  if (found) return found.id
+  const created = hotwords.addCategory({ name: '未分类', note: '还没归类的记录自动落这里' })
+  return created.ok ? created.category?.id ?? '' : ''
+}
+
+/** 总稿里认到的分类：命中已有分类就认领；写着「新建：X」才真的建一个 */
+function resolveRecordCategory(record) {
+  const want = String(record.detectedCategory ?? '').trim()
+  if (!want || record.categoryId) return
+  const name = want.replace(/^新建[:：]\s*/, '').replace(/[。，,．]$/, '').trim().slice(0, 24)
+  if (!name) return
+  const existing = hotwords.findCategory(name)
+  if (existing) {
+    record.categoryId = existing.id
+    record.categoryName = existing.name
+    return
+  }
+  if (!/^新建[:：]/.test(want)) {
+    record.suggestedCategories = [...new Set([...(record.suggestedCategories ?? []), name])]
+    return
+  }
+  const created = hotwords.addCategory({ name, note: '整理时自动建的分类' })
+  if (created.ok) {
+    record.categoryId = created.category?.id ?? ''
+    record.categoryName = name
+  } else {
+    record.suggestedCategories = [...new Set([...(record.suggestedCategories ?? []), name])]
+  }
+}
+
+function cleanTags(tags) {
+  const list = Array.isArray(tags) ? tags : String(tags ?? '').split(/[、,，;；/|]/)
+  return [
+    ...new Set(
+      list
+        .map((t) => String(t ?? '').trim().replace(/\s+/g, ' ').slice(0, 12))
+        .filter(Boolean),
+    ),
+  ].slice(0, MAX_TAGS)
+}
+
+/** 记录的标签：页面直接改（去重、限长）；toHotwords=true 时顺手把标签收进热词库 */
+export function setTags(id, tags = [], { toHotwords = false } = {}) {
+  const record = get(id)
+  if (!record) return { ok: false, error: `没有这条记录：${id}` }
+  record.tags = cleanTags(tags)
+  let learned = null
+  if (toHotwords && record.tags.length) {
+    const target = record.categoryId || ensureFallbackCategory()
+    const r = hotwords.addTerms(target, record.tags.map((term) => ({ term })), 'manual')
+    if (r.ok) {
+      const cat = hotwords.list().categories.find((c) => c.id === target)
+      record.categoryId = record.categoryId || target
+      record.categoryName = record.categoryName || cat?.name || ''
+      learned = { added: r.added, merged: r.merged ?? 0, categoryName: cat?.name ?? '' }
+    }
+  }
+  const stored = persist(record)
+  return { ok: true, record: brief(stored), tags: stored.tags, learned }
+}
+
+/** 换分类：同时把词表快照换掉，并重算命中 */
+export function setCategory(id, ref) {
+  const record = get(id)
+  if (!record) return { ok: false, error: `没有这条记录：${id}` }
+  const key = String(ref ?? '').trim()
+  if (!key) {
+    record.categoryId = ''
+    record.categoryName = ''
+  } else {
+    const cat = hotwords.findCategory(key)
+    if (!cat) return { ok: false, error: `没有这个分类：${key}` }
+    record.categoryId = cat.id
+    record.categoryName = cat.name
+    record.hotwordTerms = hotwords.termsOf([cat.id]).terms
+  }
+  refreshHits(record)
+  const stored = persist(record)
+  return { ok: true, record: brief(stored), categoryId: stored.categoryId, categoryName: stored.categoryName }
+}
+
+/** 这次想理清的重点 / 访谈提纲：记完也能补，补完重新整理就会按它对照 */
+export function setFocus(id, focus) {
+  const record = get(id)
+  if (!record) return { ok: false, error: `没有这条记录：${id}` }
+  record.focus = String(focus ?? '').slice(0, 2000)
+  const stored = persist(record)
+  return { ok: true, record: brief(stored), focus: stored.focus }
+}
+
+/** 手工从一条记录里学热词（换过分类、或当时自动学词关着的时候用） */
+export function learnFromRecord(id) {
+  const record = get(id)
+  if (!record) return { ok: false, error: `没有这条记录：${id}` }
+  const learned = learnHotwords(record)
+  const stored = persist(record)
+  return { ok: true, learned, record: brief(stored) }
+}
+
+/**
+ * 把这条记录的原始音频按 Range 交给 `<audio>`。
+ * 为什么自己写：浏览器拖进度条靠 206 + Content-Range，一次给完整文件的话每次跳都得重下。
+ */
+export function streamAudio(req, res, id) {
+  const record = get(String(id ?? ''))
+  const file = record?.file ? path.resolve(record.file) : ''
+  let size = 0
+  try {
+    if (!file || !fs.existsSync(file)) throw new Error('no file')
+    size = fs.statSync(file).size
+  } catch {
+    res.statusCode = 404
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.end(JSON.stringify({ ok: false, error: '这条记录没有可回放的音频（文件被删了或记录里没存）' }))
+    return 'handled'
+  }
+
+  const ext = path.extname(file).toLowerCase()
+  const mime =
+    {
+      '.mp3': 'audio/mpeg',
+      '.m4a': 'audio/mp4',
+      '.wav': 'audio/wav',
+      '.ogg': 'audio/ogg',
+      '.oga': 'audio/ogg',
+      '.opus': 'audio/opus',
+      '.flac': 'audio/flac',
+      '.aac': 'audio/aac',
+      '.wma': 'audio/x-ms-wma',
+      '.webm': 'audio/webm',
+      '.mp4': 'video/mp4',
+      '.mov': 'video/quicktime',
+      '.mkv': 'video/x-matroska',
+    }[ext] ?? 'application/octet-stream'
+
+  const range = String(req.headers.range ?? '')
+  const m = range.match(/bytes=(\d*)-(\d*)/)
+  const base = { 'Content-Type': mime, 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=600' }
+  if (m) {
+    let start = m[1] ? Number(m[1]) : 0
+    let end = m[2] ? Number(m[2]) : size - 1
+    if (!m[1] && m[2]) {
+      // `bytes=-500`：末尾 N 字节
+      start = Math.max(0, size - Number(m[2]))
+      end = size - 1
+    }
+    if (start >= size || end >= size || start > end) {
+      res.writeHead(416, { ...base, 'Content-Range': `bytes */${size}` })
+      res.end()
+      return 'handled'
+    }
+    res.writeHead(206, { ...base, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': String(end - start + 1) })
+    fs.createReadStream(file, { start, end }).pipe(res)
+    return 'handled'
+  }
+  res.writeHead(200, { ...base, 'Content-Length': String(size) })
+  fs.createReadStream(file).pipe(res)
+  return 'handled'
 }
 
 export function prompts() {
@@ -595,10 +982,23 @@ export function prompts() {
     defaults: DEFAULT_PROMPTS,
     current,
     active: activePrompts(),
-    placeholders: ['{{transcript}}'],
+    placeholders: [
+      '{{transcript}}',
+      '{{plain}}',
+      '{{process}}',
+      '{{duration}}',
+      '{{chars}}',
+      '{{hotwords}}',
+      '{{categories}}',
+      '{{focus}}',
+      '{{type}}',
+    ],
     customized: Object.keys(current).length > 0,
   }
 }
+
+/** 这几段正文模板必须留一个内容占位符，否则模型看不到转写 */
+const CONTENT_KEYS = new Set(['summaryUser', 'interviewUser', 'liveUser'])
 
 /** 保存提示词：只认这四个键；空串 = 该字段回默认；两个正文模板必须带 {{transcript}} */
 export function setPrompts(patch = {}) {
@@ -611,10 +1011,7 @@ export function setPrompts(patch = {}) {
     }
     const value = String(patch[key] ?? '').trim()
     if (!value) continue
-    if (
-      (key === 'summaryUser' || key === 'liveUser') &&
-      !/\{\{\s*(transcript|plain)\s*\}\}/.test(value)
-    ) {
+    if (CONTENT_KEYS.has(key) && !/\{\{\s*(transcript|plain)\s*\}\}/.test(value)) {
       return {
         ok: false,
         error: `${key} 里必须保留 {{transcript}}（或 {{plain}}）占位符，它会被替换成转写原文`,
@@ -636,15 +1033,44 @@ const SECTION_KEYS = { 要点: 'points', 待办: 'todos', 决定: 'decisions', �
 const SUMMARY_TITLES = new Set(['摘要', '总结', '概要', 'summary', '一句话'])
 /** 「标签」这类小标题下是主题词，收进 tags */
 const TAG_TITLES = new Set(['标签', '关键词', '主题', 'tags', 'keywords'])
+/** 「分类」是热词分类，不是栏目 */
+const CATEGORY_TITLES = new Set(['分类', '类别', '热词分类'])
 const MAX_TAGS = 8
+
+/**
+ * 「正名 ← 错写」或「正名 | 错写」；也认「错写 → 正名」（箭头右边才是正名）。
+ * 整理稿的术语栏、热词自学都要用它，所以方向必须写死，不能靠猜。
+ */
+export function parseTermLine(body) {
+  const line = String(body ?? '').trim().replace(/^[-*•]\s*/, '')
+  const forward = line.match(/^(.+?)\s*(?:→|->|=>)\s*(.+)$/)
+  const backward = line.match(/^(.+?)\s*(?:←|<-|=|\||丨|｜)\s*(.+)$/)
+  const pick = forward ?? backward
+  const rawTerm = (pick ? (forward ? pick[2] : pick[1]) : line).replace(/[（(][^)）]*[)）]\s*$/, '').trim()
+  const rawAlias = pick ? (forward ? pick[1] : pick[2]) : ''
+  // 模型常写出「词 |」这种只有分隔符没别名的行：两种写法都要收干净
+  const term = rawTerm
+    .replace(/^["“「『]|["”」』]$/g, '')
+    .replace(/[\s|｜丨、,，;；:：\-—]+$/g, '')
+    .trim()
+    .slice(0, 24)
+  const aliases = rawAlias
+    .split(/[、,，;；/|丨｜]/)
+    .map((s) => s.replace(/^["“「『]|["”」』]$/g, '').replace(/^常见错写[:：]\s*/, '').trim())
+    .filter((s) => s && s !== term && s.length <= 24)
+    .slice(0, 6)
+  return term ? { term, aliases } : null
+}
 
 export function parseSummaryDoc(content) {
   const title = { value: '' }
   const summaryLines = []
   const sections = []
   const tags = []
+  let category = ''
   let current = null
   let inTags = false
+  let inCategory = false
   const closeSection = () => {
     if (current && current.items.length) sections.push(current)
     current = null
@@ -663,13 +1089,21 @@ export function parseSummaryDoc(content) {
       // 模型有时把摘要写成小标题（## 摘要）：那一段属于 summary，不要再开一个栏目
       if (SUMMARY_TITLES.has(text)) {
         inTags = false
+        inCategory = false
         continue
       }
       if (TAG_TITLES.has(text)) {
         inTags = true
+        inCategory = false
+        continue
+      }
+      if (CATEGORY_TITLES.has(text)) {
+        inCategory = true
+        inTags = false
         continue
       }
       inTags = false
+      inCategory = false
       current = { key: SECTION_KEYS[text] ?? 'other', title: text, items: [] }
       continue
     }
@@ -683,6 +1117,10 @@ export function parseSummaryDoc(content) {
       }
       continue
     }
+    if (inCategory) {
+      if (!category) category = body.replace(/^[-*•]\s*/, '').trim()
+      continue
+    }
     if (current) current.items.push(body)
     else summaryLines.push(body)
   }
@@ -692,6 +1130,7 @@ export function parseSummaryDoc(content) {
     summary: summaryLines.join('\n').replace(/^摘要[:：]\s*/, '').trim(),
     sections,
     tags: [...new Set(tags)].slice(0, MAX_TAGS),
+    category,
   }
 }
 
@@ -718,7 +1157,9 @@ function applySummary(record, content) {
   record.title = doc.title.slice(0, 30) || fallbackTitle(record.transcript)
   record.summary = doc.summary
   record.sections = doc.sections
-  record.tags = doc.tags ?? []
+  // 模型这轮没给标签就留着页面里改过的，别清空
+  if ((doc.tags ?? []).length) record.tags = doc.tags
+  if (doc.category) record.detectedCategory = doc.category
 }
 
 /** 停止后（或事后手动）总结：一次非流式调用 */
@@ -740,6 +1181,8 @@ export async function summarizeRecord(record, { model } = {}) {
       if (!r.ok) return { ok: false, error: r.error }
       applySummary(record, r.content)
       record.parts = r.parts
+      resolveRecordCategory(record)
+      record.learned = learnHotwords(record)
       record.model = useModel ?? loadConfig().ai?.model ?? null
       return { ok: true, model: record.model }
     }
@@ -755,6 +1198,8 @@ export async function summarizeRecord(record, { model } = {}) {
     if (!r.ok) return { ok: false, error: r.error ?? '模型调用失败' }
     if (!String(r.content ?? '').trim()) return { ok: false, error: '模型没返回正文（输出预算可能被思考吃光）' }
     applySummary(record, r.content)
+    resolveRecordCategory(record)
+    record.learned = learnHotwords(record)
     record.model = r.model ?? null
     return { ok: true, model: record.model }
   } catch (err) {
@@ -928,11 +1373,15 @@ export async function summarizeStream({ id, model, onEvent, signal } = {}) {
 
   applySummary(record, content)
   if (parts) record.parts = parts
+  resolveRecordCategory(record)
+  record.learned = learnHotwords(record)
   record.model = useModel ?? loadConfig().ai?.model ?? null
   const stored = persist(record)
   console.log(
-    `[memo] summarize ${record.id} ok：${isLong ? `分段 ${parts?.length ?? 0} 段 + 合并` : `${deltas} 个 delta`}，正文 ${String(content).length} 字`,
+    `[memo] summarize ${record.id} ok：${isLong ? `分段 ${parts?.length ?? 0} 段 + 合并` : `${deltas} 个 delta`}` +
+      `，正文 ${String(content).length} 字，分类=${stored.categoryName || '未定'}，学词 ${record.learned?.added?.length ?? 0} 个`,
   )
+  onEvent?.({ type: 'learned', categoryName: stored.categoryName, terms: record.learned?.added ?? [] })
   onEvent?.({ type: 'done', id: stored.id, title: stored.title, record: brief(stored) })
   return { ok: true, record: brief(stored) }
 }
@@ -1006,7 +1455,13 @@ export function markdown(record) {
   lines.push(`- 字数：${record.chars}`)
   if (record.device) lines.push(`- 设备：${record.device}`)
   if (record.model) lines.push(`- 模型：${record.model}`)
+  lines.push(`- 类型：${record.type === 'interview' ? '访谈' : '口述'}`)
+  if (record.categoryName) lines.push(`- 分类：${record.categoryName}`)
   if ((record.tags ?? []).length) lines.push(`- 主题：${record.tags.join(' / ')}`)
+  const used = (record.hotwords ?? []).map((x) => x.term).filter(Boolean)
+  const fresh = (record.newTerms ?? []).map((x) => x.term).filter(Boolean)
+  if (used.length) lines.push(`- 热词命中：${used.join(' / ')}`)
+  if (fresh.length) lines.push(`- 新学热词：${fresh.join(' / ')}`)
   lines.push('')
   if (record.summary) lines.push('## 摘要', '', record.summary, '')
   for (const section of record.sections ?? []) {

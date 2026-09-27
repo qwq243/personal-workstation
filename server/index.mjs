@@ -36,6 +36,7 @@ import * as wikiLlm from './lib/wiki-llm.mjs'
 import * as wikiWeb from './lib/wiki-websearch.mjs'
 import * as singleton from './lib/singleton.mjs'
 import * as memo from './lib/memo.mjs'
+import * as hotwords from './lib/hotwords.mjs'
 import { handleMcp } from './mcp.mjs'
 
 const cfg = loadConfig()
@@ -1021,7 +1022,14 @@ route('POST', /^\/api\/memo\/upload$/, (req, { body, query }) => {
 
 /** 起一个转写任务：立刻回 jobId；转写与总结在后台跑 */
 route('POST', /^\/api\/memo\/transcribe$/, (req, { body }) =>
-  memo.startTranscribe({ path: body?.path, name: body?.name, source: 'web' }),
+  memo.startTranscribe({
+    path: body?.path,
+    name: body?.name,
+    source: 'web',
+    type: body?.type,
+    category: body?.category,
+    focus: body?.focus,
+  }),
 )
 
 /** 轮询任务；转写完成后顺手带上落成的记录 */
@@ -1051,6 +1059,31 @@ route('GET', /^\/api\/memo\/export$/, (req, { query }) => memo.exportDoc(String(
 route('POST', /^\/api\/memo\/rename$/, (req, { body }) => memo.rename(String(body?.id ?? ''), body?.title))
 
 route('POST', /^\/api\/memo\/delete$/, (req, { body }) => memo.remove(String(body?.id ?? '')))
+
+/* 整理前的那几个开关：记录类型（口述/访谈）、默认热词分类、是否自动学新词 */
+route('GET', /^\/api\/memo\/options$/, () => ({ ok: true, options: memo.options(), hotwords: hotwords.list() }))
+
+route('POST', /^\/api\/memo\/options$/, (req, { body }) => memo.setOptions(body ?? {}))
+
+/* 热词库：分类 + 词表（页面「热词」页走这两条）；动作分支在 lib/hotwords.mjs 的 act() */
+route('GET', /^\/api\/memo\/hotwords$/, () => ({ ok: true, ...hotwords.list() }))
+
+route('POST', /^\/api\/memo\/hotwords$/, (req, { body }) => hotwords.act(body ?? {}))
+
+/* 从一条已存的记录里再学一遍热词（自动学词关着、或事后改了分类时用） */
+route('POST', /^\/api\/memo\/hotwords\/extract$/, (req, { body }) =>
+  memo.learnFromRecord(String(body?.id ?? '')))
+
+/* 记录的标签 / 分类 / 重点：标签可直接改，toHotwords=true 时顺手收进热词库 */
+route('POST', /^\/api\/memo\/tags$/, (req, { body }) =>
+  memo.setTags(String(body?.id ?? ''), body?.tags ?? [], { toHotwords: body?.toHotwords === true }))
+
+route('POST', /^\/api\/memo\/category$/, (req, { body }) => memo.setCategory(String(body?.id ?? ''), body?.category))
+
+route('POST', /^\/api\/memo\/focus$/, (req, { body }) => memo.setFocus(String(body?.id ?? ''), body?.focus))
+
+/* 原始音频回放：按 Range 给 <audio>（拖进度条靠 206）；令牌走 ?token= */
+route('GET', /^\/api\/memo\/audio$/, (req, { query, res }) => memo.streamAudio(req, res, String(query.id ?? '')))
 
 route('POST', /^\/api\/memo\/summarize$/, (req, { body }) =>
   timed('memo.summarize', () => memo.resummarize(String(body?.id ?? ''), { model: body?.model })))

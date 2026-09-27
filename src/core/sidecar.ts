@@ -469,8 +469,8 @@ export const api = {
       return { ok: res.ok, data: j, error: res.ok ? undefined : (j?.error ?? `HTTP ${res.status}`) } as any
     }),
   /** 起一个转写任务，立刻返回 jobId（转写与总结在后台跑） */
-  memoTranscribe: (path: string, name?: string) =>
-    call('/api/memo/transcribe', { method: 'POST', body: { path, name }, timeout: 30000 }),
+  memoTranscribe: (path: string, name?: string, extra: { type?: string; category?: string; focus?: string } = {}) =>
+    call('/api/memo/transcribe', { method: 'POST', body: { path, name, ...extra }, timeout: 30000 }),
   /** 轮询一个任务；转写完成后顺手带上落成的记录 */
   memoJob: (id: string) => call(`/api/memo/job?id=${encodeURIComponent(id)}`, { timeout: 30000 }),
   /** 总结用哪个模型（清单与知识库问答同源） */
@@ -489,6 +489,32 @@ export const api = {
   memoDelete: (id: string) => call('/api/memo/delete', { method: 'POST', body: { id }, timeout: 20000 }),
   memoSummarize: (id: string, model = '') =>
     call('/api/memo/summarize', { method: 'POST', body: { id, model }, timeout: 300000 }),
+  /** 整理前的那几个开关：记录类型（口述/访谈）、默认热词分类、是否自动学新词 */
+  memoOptions: () => call('/api/memo/options', { timeout: 20000 }),
+  memoSetOptions: (patch: { type?: string; hotwordCategories?: string[]; autoHotwords?: boolean }) =>
+    call('/api/memo/options', { method: 'POST', body: patch, timeout: 20000 }),
+  /** 热词库：分类 + 词表（只读） */
+  memoHotwords: () => call('/api/memo/hotwords', { timeout: 20000 }),
+  /** 热词库增删改：{action, …}，分支在边车 lib/hotwords.mjs 的 act() */
+  memoHotwordAct: (payload: Record<string, any>) =>
+    call('/api/memo/hotwords', { method: 'POST', body: payload, timeout: 30000 }),
+  /** 从一条已存的记录里再学一遍热词 */
+  memoExtractHotwords: (id: string) =>
+    call('/api/memo/hotwords/extract', { method: 'POST', body: { id }, timeout: 60000 }),
+  /** 改记录的标签（toHotwords=true 时顺手收进热词库） */
+  memoTags: (id: string, tags: string[], toHotwords = false) =>
+    call('/api/memo/tags', { method: 'POST', body: { id, tags, toHotwords }, timeout: 30000 }),
+  /** 换记录的分类（空串 = 清掉；会重算热词命中） */
+  memoCategory: (id: string, category: string) =>
+    call('/api/memo/category', { method: 'POST', body: { id, category }, timeout: 30000 }),
+  /** 这次想理清的重点 / 访谈提纲（改完重新整理会按它对照） */
+  memoFocus: (id: string, focus: string) =>
+    call('/api/memo/focus', { method: 'POST', body: { id, focus }, timeout: 20000 }),
+  /** 原始音频的回放地址（带令牌，直接喂给 <audio>；支持 Range 拖进度） */
+  memoAudioUrl: async (id: string) => {
+    const t = await ensureToken()
+    return `${base}/api/memo/audio?id=${encodeURIComponent(id)}${t ? `&token=${encodeURIComponent(t)}` : ''}`
+  },
 
   // ↓ 新接口加在这里（与 server/index.mjs 里那条 route() 一一对应；
   //   加完顺手看一眼 docs/EXTENDING.md §3.3 的三条约定：只在这里发请求、别裸 fetch、超时按任务时长给）
@@ -500,6 +526,7 @@ export type MemoSummaryEvent =
   | { type: 'reasoning'; text: string; chars?: number }
   | { type: 'tick'; elapsedSec: number; phase?: string; reasoningChars?: number }
   | { type: 'delta'; text: string }
+  | { type: 'learned'; categoryName?: string; terms?: { term: string }[] }
   | { type: 'done'; id?: string; title?: string; record?: any }
   | { type: 'error'; error: string }
   | { type: 'end' }

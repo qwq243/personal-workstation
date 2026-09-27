@@ -17,6 +17,8 @@ import PageHeader from '@/components/PageHeader.vue'
 import SidecarOffline from '@/components/SidecarOffline.vue'
 import MdLite from '@/components/MdLite.vue'
 import { usePolling } from '@/core/polling'
+import { useRouter } from 'vue-router'
+import MemoAudioPlayer from './MemoAudioPlayer.vue'
 import { api, ensureSidecar, memoSummarizeStream } from '@/core/sidecar'
 
 const ready = ref(false)
@@ -36,6 +38,7 @@ const models = ref<string[]>([])
 const defaultModel = ref('')
 const model = ref('')
 
+const router = useRouter()
 const promptOpen = ref(false)
 const promptLoading = ref(false)
 const promptSaving = ref(false)
@@ -52,16 +55,143 @@ function hintOf(f: { hint: string }) {
 }
 
 const promptFields = [
-  { key: 'summarySystem', label: '总结 · 系统', hint: '给模型的角色设定与硬要求' },
-  { key: 'summaryUser', label: '总结 · 要求', hint: '{{transcript}} 会被替换成带时间轴的转写正文' },
-  { key: 'liveSystem', label: '滚动摘要 / 分段详析 · 系统', hint: '长稿分段详析时也用它' },
-  { key: 'liveUser', label: '滚动摘要 / 分段详析 · 要求', hint: '{{transcript}} 占位符' },
+  { key: 'summarySystem', label: '口述 · 系统', hint: '给模型的角色设定与硬要求' },
+  { key: 'summaryUser', label: '口述 · 要求', hint: '{{transcript}} 会被替换成转写正文' },
+  { key: 'interviewSystem', label: '访谈 · 系统', hint: '逐字稿纪律：引语是原话、推断单独写' },
+  { key: 'interviewUser', label: '访谈 · 要求', hint: '受访者 / 关键引语 / 主题与编码 / 待追问' },
+  { key: 'liveSystem', label: '分段详析 · 系统', hint: '长稿分段详析时也用它' },
+  { key: 'liveUser', label: '分段详析 · 要求', hint: '{{transcript}} 占位符' },
 ]
 
 const records = ref<any[]>([])
 const current = ref<any>(null)
 const titleDraft = ref('')
 const busy = ref(false)
+
+/* 整理前的那几个开关（存边车 settings.json） */
+const options = ref<{ type: string; hotwordCategories: string[]; autoHotwords: boolean }>({
+  type: 'oral',
+  hotwordCategories: [],
+  autoHotwords: true,
+})
+/** 这次任务怎么整理：类型 + 想理清的重点（可空） */
+const startType = ref('oral')
+const startFocus = ref('')
+
+/* 记录的标签 / 分类 / 重点 + 热词库（详情里直接改） */
+const tagsDraft = ref<string[]>([])
+const focusDraft = ref('')
+const hotCategories = ref<any[]>([])
+const hotTermHints = ref<string[]>([])
+const audioUrl = ref('')
+const player = ref<any>(null)
+
+async function loadOptions() {
+  const r = await api.memoOptions()
+  const d = r.data as any
+  if (r.ok && d?.ok !== false) {
+    if (d.options) {
+      options.value = { ...options.value, ...d.options }
+      startType.value = options.value.type
+    }
+    hotCategories.value = d.hotwords?.categories ?? []
+  }
+}
+
+async function loadHotwords() {
+  const r = await api.memoHotwords()
+  const d = r.data as any
+  if (!r.ok || d?.ok === false) return
+  hotCategories.value = d.categories ?? []
+  const terms: string[] = []
+  for (const cat of hotCategories.value) for (const t of cat.terms ?? []) if (t.term) terms.push(t.term)
+  hotTermHints.value = [...new Set(terms)].slice(0, 300)
+}
+
+async function setStartType(value: string | number | boolean | undefined) {
+  startType.value = value === 'interview' ? 'interview' : 'oral'
+  const r = await api.memoSetOptions({ type: startType.value })
+  const d = r.data as any
+  if (!r.ok || d?.ok === false) ElMessage.error(d?.error ?? r.error ?? '记录类型没存上')
+}
+
+async function saveTags() {
+  if (!current.value) return
+  const r = await api.memoTags(current.value.id, tagsDraft.value, false)
+  const d = r.data as any
+  if (!r.ok || d?.ok === false) {
+    ElMessage.error(d?.error ?? r.error ?? '标签没存上')
+    return
+  }
+  if (d.record) {
+    current.value = { ...current.value, tags: d.record.tags }
+    const item = records.value.find((x) => x.id === current.value.id)
+    if (item) item.tags = d.record.tags
+  }
+}
+
+async function tagsToHotwords() {
+  if (!current.value || !tagsDraft.value.length) {
+    ElMessage.warning('这条还没有标签')
+    return
+  }
+  const r = await api.memoTags(current.value.id, tagsDraft.value, true)
+  const d = r.data as any
+  if (!r.ok || d?.ok === false) {
+    ElMessage.error(d?.error ?? r.error ?? '收不进去')
+    return
+  }
+  await loadHotwords()
+  const learned = d.learned
+  ElMessage.success(
+    learned
+      ? `已收进「${learned.categoryName || '未分类'}」：新增 ${learned.added} 个（已有的并进别名 ${learned.merged ?? 0}）`
+      : '已经都在词库里了',
+  )
+}
+
+async function changeRecordCategory(name: string) {
+  if (!current.value) return
+  const r = await api.memoCategory(current.value.id, name)
+  const d = r.data as any
+  if (!r.ok || d?.ok === false) {
+    ElMessage.error(d?.error ?? r.error ?? '换分类失败')
+    return
+  }
+  if (d.record) current.value = { ...current.value, categoryId: d.categoryId, categoryName: d.categoryName, hotwords: d.record.hotwords }
+  ElMessage.success(name ? `分类改成「${d.categoryName}」` : '已清掉分类')
+}
+
+async function saveFocus() {
+  if (!current.value) return
+  const text = focusDraft.value.trim()
+  if (text === String(current.value.focus ?? '').trim()) return
+  const r = await api.memoFocus(current.value.id, text)
+  const d = r.data as any
+  if (!r.ok || d?.ok === false) {
+    ElMessage.error(d?.error ?? r.error ?? '没存上')
+    return
+  }
+  current.value = { ...current.value, focus: text }
+}
+
+async function learnFromRecord() {
+  if (!current.value) return
+  const r = await api.memoExtractHotwords(current.value.id)
+  const d = r.data as any
+  if (!r.ok || d?.ok === false) {
+    ElMessage.error(d?.error ?? r.error ?? '学不了')
+    return
+  }
+  await loadHotwords()
+  await open(current.value.id)
+  const added = d.learned?.added ?? []
+  ElMessage.success(
+    added.length
+      ? `学到 ${added.length} 个新词（${d.learned?.categoryName || '未分类'}）：${added.map((t: any) => t.term).join('、')}`
+      : '没有新词可学（都已收过）',
+  )
+}
 
 const streaming = ref(false)
 const streamText = ref('')
@@ -127,6 +257,7 @@ async function load() {
     await loadStatus()
     await loadModels()
     await loadRecords()
+    await Promise.all([loadOptions(), loadHotwords()])
   } finally {
     loading.value = false
   }
@@ -181,7 +312,10 @@ async function submitFile(file: File) {
       ElMessage.error('上传成功但没拿到路径')
       return
     }
-    const r = await api.memoTranscribe(abs, file.name)
+    const r = await api.memoTranscribe(abs, file.name, {
+      type: startType.value,
+      focus: startFocus.value,
+    })
     if (!r.ok) {
       ElMessage.error(r.error ?? '起任务失败')
       return
@@ -215,6 +349,9 @@ async function open(id: string) {
   }
   current.value = r.data?.record ?? null
   titleDraft.value = current.value?.title ?? ''
+  tagsDraft.value = [...(current.value?.tags ?? [])]
+  focusDraft.value = current.value?.focus ?? ''
+  audioUrl.value = current.value?.file ? await api.memoAudioUrl(current.value.id) : ''
   streamText.value = ''
   streamReasoning.value = ''
   streamPhase.value = ''
@@ -401,6 +538,9 @@ onMounted(init)
             <el-option v-for="m in models" :key="m" :label="m" :value="m" />
           </el-select>
           <el-button size="small" :disabled="streaming" @click="openPrompts">提示词</el-button>
+          <el-button size="small" @click="router.push('/memo/hotwords')">
+            <el-icon><Notebook /></el-icon>&nbsp;热词
+          </el-button>
           <el-button size="small" :loading="loading" @click="load">
             <el-icon><Refresh /></el-icon>&nbsp;刷新
           </el-button>
@@ -432,6 +572,24 @@ onMounted(init)
       <el-skeleton v-if="loading && !asr" :rows="6" animated />
 
       <template v-else>
+        <!-- ==================================================== 这次怎么整理 -->
+        <div class="ws-card howto">
+          <div class="ws-row" style="align-items: center; gap: 10px; flex-wrap: wrap">
+            <span class="ws-dim">这次怎么整理</span>
+            <el-radio-group :model-value="startType" size="small" @update:model-value="setStartType">
+              <el-radio-button value="oral">口述</el-radio-button>
+              <el-radio-button value="interview">访谈</el-radio-button>
+            </el-radio-group>
+            <span class="ws-dim">访谈走「受访者 / 关键引语 / 主题与编码 / 待追问」那套骨架</span>
+          </div>
+          <el-input
+            v-model="startFocus"
+            size="small"
+            style="margin-top: 8px"
+            placeholder="这次想理清的重点 / 访谈提纲（可空；填了会在成稿时做「问题对照」）"
+          />
+        </div>
+
         <!-- ==================================================== 上传区 -->
         <div
           class="ws-card drop"
@@ -507,8 +665,80 @@ onMounted(init)
               </div>
 
               <div class="detail__meta ws-dim">
-                {{ fmtStamp(current.startedAt) }} · {{ current.chars }} 字 · 用 {{ modelLabel }}
-                <template v-if="current.file"> · <span class="ws-mono">{{ current.file }}</span></template>
+                {{ fmtStamp(current.startedAt) }} · {{ current.chars }} 字 · {{ current.type === 'interview' ? '访谈' : '口述' }} · 用 {{ modelLabel }}
+                <template v-if="current.categoryName"> · {{ current.categoryName }}</template>
+              </div>
+
+              <!-- 原始音频：上传的那份留在 inbox/，这里直接回放 -->
+              <div v-if="audioUrl" class="audio-wrap">
+                <MemoAudioPlayer ref="player" :url="audioUrl" :title="`${current.title || 'memo'}`" />
+              </div>
+
+              <!-- 分类 / 标签 / 热词 / 重点 -->
+              <div class="organize">
+                <div class="organize__row">
+                  <label>分类</label>
+                  <el-select
+                    :model-value="current.categoryName"
+                    size="small"
+                    class="organize__ctl"
+                    placeholder="未分类"
+                    clearable
+                    filterable
+                    @change="changeRecordCategory"
+                  >
+                    <el-option v-for="c in hotCategories" :key="c.id" :value="c.name" :label="c.name" />
+                  </el-select>
+                  <span v-if="(current.suggestedCategories ?? []).length" class="ws-dim">
+                    模型建议
+                    <el-button
+                      v-for="sname in current.suggestedCategories"
+                      :key="sname"
+                      link
+                      size="small"
+                      @click="changeRecordCategory(sname)"
+                      >新建「{{ sname }}」</el-button
+                    >
+                  </span>
+                </div>
+                <div class="organize__row">
+                  <label>标签</label>
+                  <el-select
+                    v-model="tagsDraft"
+                    size="small"
+                    class="organize__ctl"
+                    multiple
+                    filterable
+                    allow-create
+                    default-first-option
+                    :reserve-keyword="false"
+                    placeholder="主题词，输入后可回车新建"
+                    @change="saveTags"
+                  >
+                    <el-option v-for="t in hotTermHints" :key="t" :value="t" :label="t" />
+                  </el-select>
+                  <el-button link size="small" @click="tagsToHotwords">收进热词库</el-button>
+                  <el-button link size="small" @click="learnFromRecord">学热词</el-button>
+                </div>
+                <div v-if="(current.hotwords ?? []).length || (current.newTerms ?? []).length" class="organize__row">
+                  <label>热词</label>
+                  <div class="organize__tags">
+                    <span v-for="h in current.hotwords ?? []" :key="'u-' + h.term" class="tag tag--word">{{ h.term }}</span>
+                    <span v-for="t in current.newTerms ?? []" :key="'n-' + t.term" class="tag tag--new" title="这次新学到的">
+                      +{{ t.term }}
+                    </span>
+                  </div>
+                </div>
+                <div class="organize__row">
+                  <label>重点</label>
+                  <el-input
+                    v-model="focusDraft"
+                    size="small"
+                    class="organize__ctl"
+                    placeholder="这次想理清什么 / 访谈提纲（可空，改完重新整理会按它做对照）"
+                    @change="saveFocus"
+                  />
+                </div>
               </div>
 
               <div v-if="streaming" class="stream">
@@ -802,5 +1032,67 @@ onMounted(init)
 .pf__hint {
   font-size: 12px;
   margin: 2px 0 6px;
+}
+
+/* ------------------------------------------------- 这次怎么整理 + 详情里的编辑区 --- */
+.howto {
+  padding: 12px 16px;
+}
+.audio-wrap {
+  margin: 10px 0 2px;
+}
+.organize {
+  margin: 10px 0 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--ws-border);
+  border-radius: var(--ws-radius);
+}
+.organize__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+}
+.organize__row + .organize__row {
+  margin-top: 8px;
+}
+.organize__row > label {
+  flex: 0 0 auto;
+  width: 34px;
+  font-size: 12px;
+  color: var(--ws-text-3);
+}
+.organize__ctl {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 460px;
+}
+.organize__tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.tag {
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid var(--ws-border);
+  border-radius: 999px;
+  background: var(--el-fill-color-lighter);
+  color: var(--ws-text-3);
+  font-size: 11px;
+  line-height: 17px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tag--word {
+  font-family: var(--ws-mono);
+}
+.tag--new {
+  border-color: var(--el-color-success-light-6);
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success-dark-2);
+  font-family: var(--ws-mono);
 }
 </style>

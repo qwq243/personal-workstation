@@ -21,6 +21,7 @@ import * as vocab from './lib/vocab.mjs'
 import * as wiki from './lib/wiki.mjs'
 import * as wikiQueue from './lib/wiki-queue.mjs'
 import * as memo from './lib/memo.mjs'
+import * as hotwords from './lib/hotwords.mjs'
 
 const SERVER_INFO = { name: 'workstation', version: '0.1.0' }
 
@@ -477,6 +478,9 @@ const TOOLS = [
       properties: {
         path: { type: 'string', description: '音频文件的绝对路径（先上传或自己放好）' },
         name: { type: 'string', description: '显示名（默认取文件名）' },
+        type: { type: 'string', description: '整理类型：oral（口述，默认）或 interview（访谈，走访谈骨架）' },
+        category: { type: 'string', description: '指定热词分类（id 或名字）；不传就按页面默认分类或让模型自己认' },
+        focus: { type: 'string', description: '这次想理清的重点 / 访谈提纲（可空）' },
       },
       required: ['path'],
     },
@@ -502,7 +506,7 @@ const TOOLS = [
   },
   {
     name: 'read_memo',
-    description: '读一条语音随记的全文：标题、摘要、要点/待办等栏目、带时间轴的转写原文。只读。',
+    description: '读一条语音随记的全文：标题、摘要、要点/待办等栏目、热词命中、转写原文。只读。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -510,7 +514,51 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'memo_hotwords',
+    description:
+      '语音随记的热词库（分类 → 词表：词 + 常见错写别名）。转写纠错与标签都靠它。' +
+      'action：list（默认，只看）/ category-add / category-update / category-remove / ' +
+      'term-add / terms-add（批量）/ term-update / term-remove / term-move / import-preset（把出厂预设包导入某个分类）。' +
+      'categoryId 传 id 或分类名；term 可以给字符串或 {term, aliases, note}。' +
+      '页面在「语音随记 → 热词」，改完对下一次整理生效。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: '动作，默认 list' },
+        categoryId: { type: 'string', description: '分类 id 或名字' },
+        name: { type: 'string', description: 'category-add 的分类名' },
+        note: { type: 'string', description: '分类或词的备注' },
+        term: { type: 'object', description: '{term, aliases?, note?} 或直接给字符串' },
+        terms: { type: 'array', description: 'terms-add 的批量词表', items: { type: 'string' } },
+        oldTerm: { type: 'string', description: 'term-update 里被改的词' },
+        patch: { type: 'object', description: '要改的字段，如 {term, aliases, note}' },
+        toCategoryId: { type: 'string', description: 'term-move 的目标分类' },
+        presetId: { type: 'string', description: 'import-preset 的预设包 id' },
+      },
+    },
+  },
+  {
+    name: 'update_memo',
+    description:
+      '改一条语音随记的标签或分类。tags 直接覆盖（去重、每个 ≤ 12 字）；toHotwords=true 时顺手把标签收进热词库；' +
+      'category 传空串表示清掉分类，传分类 id 或名字表示换分类（会重算热词命中）；' +
+      'focus 记下这次想理清的重点 / 访谈提纲；extract=true 表示从这条记录再学一遍热词。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '记录 id；不给就用最近一条' },
+        tags: { type: 'array', description: '新的标签列表', items: { type: 'string' } },
+        toHotwords: { type: 'boolean', description: '把标签写进热词库，默认 false' },
+        category: { type: 'string', description: '换分类（id 或名字）；空串 = 清掉' },
+        focus: { type: 'string', description: '这次想理清的重点 / 访谈提纲' },
+        extract: { type: 'boolean', description: '从这条记录再学一遍热词' },
+      },
+    },
+  },
 ]
+
+/* --------------------------------------------------------- 工具实现 --- */
 
 /* --------------------------------------------------------- 工具实现 --- */
 
@@ -937,7 +985,14 @@ ${lines.join('\n')}`, { data: r })
 
 
   async start_memo(a = {}) {
-    const r = memo.startTranscribe({ path: a.path, name: a.name, source: 'mcp' })
+    const r = memo.startTranscribe({
+      path: a.path,
+      name: a.name,
+      source: 'mcp',
+      type: a.type,
+      category: a.category,
+      focus: a.focus,
+    })
     if (!r.ok) return ok(`起不了转写任务：${r.error}`, { data: r, error: true })
     const job = r.job
     return ok(
@@ -983,16 +1038,66 @@ ${lines.join('\n')}`, { data: r })
     const sections = (record.sections ?? [])
       .map((s) => `${s.title}：\n${s.items.map((i) => `- ${i}`).join('\n')}`)
       .join('\n\n')
-    const transcript = (record.segments ?? [])
+    // 逐段时间轴不是所有后端都给：拿不到就退回整篇文本
+    const timeline = (record.segments ?? [])
       .map((s) => `[${Math.floor(s.start / 60)}:${String(Math.round(s.start % 60)).padStart(2, '0')}] ${s.text}`)
       .join('\n')
+    const transcript = timeline || String(record.transcript ?? '')
+    const used = (record.hotwords ?? []).map((t) => t.term).filter(Boolean)
+    const fresh = (record.newTerms ?? []).map((t) => t.term).filter(Boolean)
     const text =
       `# ${record.title}\n\n` +
-      `时间：${new Date(record.startedAt).toLocaleString('zh-CN')}｜时长 ${record.durationSec} 秒｜${record.chars} 字\n` +
+      `时间：${new Date(record.startedAt).toLocaleString('zh-CN')}｜时长 ${record.durationSec} 秒｜${record.chars} 字` +
+      `｜类型 ${record.type === 'interview' ? '访谈' : '口述'}${record.categoryName ? `｜分类 ${record.categoryName}` : ''}\n` +
+      ((record.tags ?? []).length ? `标签：${record.tags.join(' / ')}\n` : '') +
+      (used.length ? `热词命中：${used.join(' / ')}\n` : '') +
+      (fresh.length ? `新学热词：${fresh.join(' / ')}\n` : '') +
       (record.summary ? `\n摘要：${record.summary}\n` : '') +
       (sections ? `\n${sections}\n` : '') +
       `\n转写原文：\n${transcript}`
     return ok(text, { data: record })
+  },
+
+  async memo_hotwords(a = {}) {
+    const r = hotwords.act(a)
+    if (!r.ok) return ok(`没成：${r.error}`, { data: r, error: true })
+    if ((a.action ?? 'list') === 'list') {
+      const cats = (r.categories ?? []).map((c) => `· ${c.name}（${c.count} 个）`).join('\n')
+      const presets = (r.presets ?? []).map((p) => `· ${p.id}｜${p.name}（${p.count} 个：${p.sample.join('、')}…）`).join('\n')
+      return ok(`热词库：${r.total} 个词、${(r.categories ?? []).length} 个分类\n${cats || '（还没有分类）'}\n\n可导入的预设包：\n${presets}`, { data: r })
+    }
+    const tail = r.added != null ? `（新增 ${r.added}${r.merged ? `，并入别名 ${r.merged}` : ''}）` : ''
+    return ok(`已处理：${a.action ?? 'list'}${tail}${r.preset ? `，来源预设「${r.preset}」` : ''}`, { data: r })
+  },
+
+  async update_memo(a = {}) {
+    const id = String(a.id ?? memo.list({ limit: 1 })[0]?.id ?? '')
+    if (!id) return ok('还没有任何随记记录。', { data: {}, error: true })
+    const done = []
+    if (Array.isArray(a.tags)) {
+      const r = memo.setTags(id, a.tags, { toHotwords: a.toHotwords === true })
+      if (!r.ok) return ok(`改标签失败：${r.error}`, { data: r, error: true })
+      done.push(`标签 → ${r.tags.join(' / ') || '（清空）'}`)
+      if (r.learned) done.push(`收进热词库「${r.learned.categoryName}」${r.learned.added} 个`)
+    }
+    if ('category' in a) {
+      const r = memo.setCategory(id, a.category)
+      if (!r.ok) return ok(`换分类失败：${r.error}`, { data: r, error: true })
+      done.push(`分类 → ${r.categoryName || '（清掉）'}`)
+    }
+    if ('focus' in a) {
+      const r = memo.setFocus(id, a.focus)
+      if (!r.ok) return ok(`记重点失败：${r.error}`, { data: r, error: true })
+      done.push(r.focus ? '重点已记下' : '重点已清掉')
+    }
+    if (a.extract === true) {
+      const r = memo.learnFromRecord(id)
+      if (!r.ok) return ok(`学热词失败：${r.error}`, { data: r, error: true })
+      done.push(`从记录里学到 ${(r.learned?.added ?? []).length} 个新词（${r.learned?.categoryName || '未分类'}）`)
+    }
+    if (!done.length) return ok('没给要改的东西：可以给 tags / category / focus / extract。', { data: {}, error: true })
+    const record = memo.get(id)
+    return ok(`已更新 ${record?.title ?? id}：\n· ${done.join('\n· ')}`, { data: { record } })
   },
 }
 

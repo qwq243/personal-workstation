@@ -19,7 +19,7 @@
 | **规划台** | `plan` | `#/plan` | 长期目标：关键日期倒计时 + 项目与下一步 + 备考清单 | **无** | 无（出厂空态，页面上自己加） | `data/plan.json`（`jsonstore` 加固写） |
 | **英语学习** | `vocab` | `#/vocab` | 每日一句（写翻译→核对→自评打卡）+ 单词（词单/练习/错题本/训练计划，SRS） | 有道的**公开**发音音频（由边车代理，命中缓存不再出网）；每日一句要自备句库 | 转写/模型都不需要；每日一句要按 [每日一句导入.md](每日一句导入.md) 导入句库 | `data/vocab/{lists,progress}.json`、`data/vocab/audio/`、`data/english/daily-sentence/{sentences,progress}.json` |
 | **知识库** | `wiki` | `#/wiki`（+ `/wiki/chat`·`/wiki/ingest`·`/wiki/settings`） | 抓链接 / 拖文件 → 队列 → 编译成互链页面；语义检索、双链图谱、会话问答、结构体检 | 模型端点（编译与问答，**必需**）；嵌入端点、MinerU、网络搜索、本机解析工具、AnyTXT（**都可选**，缺了各自降级） | `wiki.dir`（唯一必需项；**没配就从侧边栏隐藏**） | 知识库目录（`wiki/` + `raw/`，在你的盘上）+ `data/wiki-{projects,chats,vectors,review,queue,watch}.json` |
-| **语音随记** | `memo` | `#/memo` | 传一段录音 → 转写 → 自动起标题写摘要 → 落成一条可回看的记录 | OpenAI 兼容的 `/audio/transcriptions`（**必需**）+ 模型端点（写摘要） | `asr.baseUrl`（+ 可选 `asr.apiKey`、`llm.keys`）。**没配就从侧边栏隐藏** | `data/memo/{records.json, records/*.md, inbox/, jobs.json, settings.json}` |
+| **语音随记** | `memo` | `#/memo` | 传一段录音 → 转写 → 按口述/访谈骨架整理成稿；热词库负责转写纠错与标签，原始音频可回放 | OpenAI 兼容的 `/audio/transcriptions`（**必需**）+ 模型端点（写摘要） | `asr.baseUrl`（+ 可选 `asr.apiKey`、`llm.keys`）。**没配就从侧边栏隐藏** | `data/memo/{records.json, records/*.md, inbox/, hotwords.json, jobs.json, settings.json}` |
 | **进程守护** | `guard` | `#/process-guard` | 按 CPU 阈值释放开发工具内存、结束失控进程、定时回收内存；另带端口与智能体两个视图 | **无**（只用 Windows 自带命令 + PowerShell） | 无（出厂**演练模式**：照常判定、写审计，不动手） | `data/pguard/{config.json,actions.jsonl,engine.log}`、`data/procscan-actions.jsonl` |
 
 | **运行与自启** | `service` | `#/service` | 边车自身状态（端口 / PID / node / 入口）＋ 开机自启位体检与开启 / 关闭 / 删除 | **无**（操作的是启动文件夹，不联网；Windows 专有） | 无 | `scripts/Workstation.vbs`（运行时生成，不进版本库）、`logs/sidecar-autostart.log` |
@@ -38,6 +38,22 @@
 | 每日看板 | 只带**骨架与存储**：计划 / 记录 / 心情 / 复盘 + AI 总结卡是完整可用的；但课表卡、待办卡、签到卡、早报卡**没有随仓库分发**（它们的来源因人而异） | `src/features/dashboard/module.ts:5-6`、`DashboardHome.vue:7` |
 | 进程守护 | **没有「结束任意进程」的手动入口**（设计上划掉的：手动结束会绕过演练开关与动作预算）。页面只提供可逆的「释放内存」与需要一次 UAC 的「清系统待机列表」 | `GuardView.vue:10`、`server/index.mjs:659-664` |
 | 自启 | **已收口（2026-09-27）**：`#/service`（`src/features/service/`）把 `/api/panel/{sidecar,status,autostart}` 三条接口接上了页面；此前这几个接口是活的但没有页面调用 | 见 [ARCHITECTURE.md §4.3](ARCHITECTURE.md) |
+
+### 1.2 语音随记的「热词」是怎么起作用的
+
+一个分类 = 一张词表，每条形如 `词（正确写法） + 常见错写别名 + 来源 + 命中次数`。它只做两件事：
+
+1. **转写纠错**：别名先在本地做**确定性替换**（`hotwords.applyAliases()`：一趟扫完、长别名优先、先把正名挖成占位符，
+   否则「订单」会把「订单中心」改坏），再把词表作为提示词块交给模型复核 —— 模型只负责拿不准的那些。
+2. **打标签**：提示词要求标签优先从词表里挑；成稿后从「术语与专名」栏（`正名 ← 错写`）与标签里收新词，
+   自动进这条记录的分类（没有分类就进「未分类」）。
+
+出厂预设是**通用词**（常见同音错写 / 技术与工程 / AI 与模型 / 学术研究 / 教学与课程 / 医学与健康），
+词库空时自动铺三个起步分类；把预设当模板换成自己的词就是。过滤偏严是有意的：模型会把
+「本段未出现热词表内任何专名」这种整句当术语交上来，所以要求词形像词、**且词或别名在原文里真出现过**才收。
+
+顺带一句边界：**热词不喂给转写后端**。OpenAI 兼容的 `/audio/transcriptions` 没有词表参数，
+所以纠错只能发生在拿到文字之后 —— 这也是「本地替换 + 模型复核」这条路的原因。
 
 ---
 
@@ -87,7 +103,8 @@
 | `plan.mjs` | 382 | 规划台（含乱码拒写、倒计时口径） |
 | `vocab.mjs` | 1110 | 词单 / 学情 / 到期队列 / 复习建议 / 发音代理 |
 | `english-daily.mjs` | 258 | 每日一句的句库与进度指针 |
-| `memo.mjs` | 1087 | 语音随记的任务状态机 + 记录 |
+| `memo.mjs` | 1542 | 语音随记的任务状态机 + 记录 + 标签/分类/热词接线 |
+| `hotwords.mjs` | 553 | 热词库：分类 → 词（词 + 常见错写别名）、本地确定性纠错、自学与命中记账 |
 | `asr.mjs` | 133 | 转写后端（**只有一个实现**：OpenAI 兼容 `/audio/transcriptions`） |
 | `pguard.mjs` | 1400 | 进程守护引擎（规则、迟滞、动作预算、保护层、审计） |
 | `ai.mjs` | 243 | 看板用的 AI：总结 / 今日建议 / 复习草稿 / 问答 / 上下文汇总 |
@@ -114,10 +131,10 @@ server/lib/transfer/README.md     ← 只有一个 README，没有任何 provide
 
 ---
 
-## 4. MCP 工具（43 个）
+## 4. MCP 工具（45 个）
 
 边车在 `/mcp` 上挂 JSON-RPC 子集（`server/mcp.mjs`），`TOOLS` 与 `HANDLERS` **两边名字必须一致**
-（43 对 43，已核对）。
+（45 对 45，已核对）。
 
 | 分组 | 工具 |
 |---|---|
@@ -128,7 +145,7 @@ server/lib/transfer/README.md     ← 只有一个 README，没有任何 provide
 | 规划台（4） | `get_plan` `update_project` `update_prep` `set_goal_date` |
 | 进程/端口（2，只读） | `get_ports` `get_agent_sessions` |
 | 知识库（13） | `get_wiki_status` `search_wiki` `get_wiki_page` `write_wiki_page` `fetch_wiki_source` `ingest_wiki_source` `get_wiki_lint` `ask_wiki` `get_wiki_queue` `add_wiki_to_queue` `run_wiki_queue` `get_wiki_search` `get_wiki_projects` |
-| 语音随记（4） | `start_memo` `get_memo_job` `list_memos` `read_memo` |
+| 语音随记（6） | `start_memo` `get_memo_job` `list_memos` `read_memo` `memo_hotwords` `update_memo` |
 
 行为约定：`/mcp` 与 `/api/*` 一样要带令牌（`X-WS-Token`）；`initialize` 的 `instructions`
 （`mcp.mjs:1019-1030`）就是给智能体看的功能说明，改能力时记得同步它。
