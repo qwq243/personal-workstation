@@ -75,7 +75,7 @@
 
 | 通道 | 形状 | 用在哪 | 代码 |
 |---|---|---|---|
-| JSON API | `GET/POST/PATCH/PUT/DELETE /api/*`，统一回 `{ ok, ... }` | 绝大多数读写 | `server/index.mjs` 里 156 条 `route()` 注册 |
+| JSON API | `GET/POST/PATCH/PUT/DELETE /api/*`，统一回 `{ ok, ... }` | 绝大多数读写 | `server/index.mjs` 里 157 条 `route()` 注册 |
 | SSE | `text/event-stream`，帧是 `data: {json}\n\n` | 需要边生成边看的地方：知识库问答、语音随记总结 | `/api/wiki/chat/stream`、`/api/memo/summarize/stream` |
 | MCP | JSON-RPC 2.0 子集（`initialize`/`tools/list`/`tools/call`/`ping`），挂在 `/mcp` | 让智能体（MCP 客户端）读写工作站数据 | `server/mcp.mjs`，43 个工具 |
 
@@ -375,7 +375,7 @@ startServer()                                       :1184
 | 取舍 | 换来了什么 | 代价 |
 |---|---|---|
 | 单进程、无数据库，数据是普通 JSON 文件 | 备份 = 目录拷走；出问题能直接打开文件看；没有迁移脚本 | 没有并发控制（靠 `jsonstore` 的 `rev` 乐观并发 + 后写覆盖留证）；数据量大时整份读写 |
-| 路由表是数组 + `RegExp` 逐条匹配（`index.mjs:1231`） | 零依赖、可读、加一条就是一行 | O(n) 匹配（当前 156 条，实测无感）；没有统一参数校验层，校验散在各处理器里 |
+| 路由表是数组 + `RegExp` 逐条匹配（`index.mjs:1231`） | 零依赖、可读、加一条就是一行 | O(n) 匹配（当前 157 条，实测无感）；没有统一参数校验层，校验散在各处理器里 |
 | 同步写（`writeFileSync` + `renameSync`） | 同一进程内「Web 与 MCP 同时写」天然串行，不需要锁 | 真正的风险是进程被杀 / 磁盘满 —— 由原子写 + `.bak` + 每日快照 + `.corrupt` 留证兜 |
 | 模型输出预算集中在 `server/lib/llm.mjs` | 「思考 token 吃光正文」这类跨厂商问题只解一次 | 调用方不能自己拍 `maxTokens`；要新档位就改 `BUDGET`（`:27-34`） |
 | 边车同时发前端（生产态同源） | 部署 = 双击；不需要配反代 | 首屏与 API 抢同一个 HTTP/1.1 连接 |
@@ -407,14 +407,13 @@ startServer()                                       :1184
 
 | 类别 | 谁 | 表现 |
 |---|---|---|
-| 正确走 `config.mjs` 的 `dataDir()` | `dashboard.mjs:15,57,60`、`memo.mjs:26,32`、`scripts/seed-demo-data.mjs` | 正常跟随配置 |
+| 正确走 `config.mjs` 的 `dataDir()` | `dashboard.mjs:15,57,60`、`memo.mjs:26,32`、`index.mjs` 的 overview 磁盘缓存、`pguard.mjs` 的引擎目录（`<dataDir>/pguard`）、`scripts/seed-demo-data.mjs` | 正常跟随配置 |
 | 各自抄了一份同样的表达式 | `plan.mjs:19-20`、`summaries.mjs:29-30`、`usage-cache.mjs:19-20`、`vocab.mjs:38-39` | 认得 `WS_DATA_DIR`，但属复制粘贴，改一处会漏（`vocab.mjs:19` 的注释还专门提了这一点） |
 | 只读 `loadConfig().dataDir` | `english-daily.mjs:22`、`elevate.mjs:33`、`procscan.mjs:88`、`school-calendar.mjs:23`、`wiki-chat.mjs:25`、`wiki-embed.mjs:46`、`wiki-queue.mjs:28`、`wiki.mjs:75,274,1281`、`index.mjs:894` | **不认 `WS_DATA_DIR`** |
-| 绕开配置、直接写仓库 | `index.mjs:148`（`SERVER_DIR/data/cache/overview.json`）、`pguard.mjs:46-48`（`SERVER_DIR/data/pguard`） | 改 `dataDir` 也搬不走这两份 |
 
-结论：`WS_DATA_DIR` 目前只在测试脚本与上表前两类模块里生效。
+结论：`WS_DATA_DIR` 目前只在测试脚本与上表前两类模块里生效（第三类只认 `config.json` 的 `dataDir`）。
 把它当「一键把数据挪到别的盘」会失望 —— 要挪就改 `config.json` 的 `dataDir`，
-并知道第四类那两份仍然留在仓库里。
+并知道第三类那几份不会跟着动。
 
 ### 6.5 文档与代码的几处漂移（已核对）
 
@@ -433,7 +432,7 @@ startServer()                                       :1184
 | `server/config.mjs` 的 `MIRROR_SECTIONS`（顶层 → `wiki.*` 的只读镜像） | 全站配置会同步一份带 `_mirror` 标记的副本到 `wiki.*`，文件里长期躺着两份值。这是历史迁移的残留。**改配置一律改顶层**，`wiki.*` 那几节会在下次启动被覆盖 | 未修（有意的向后兼容） |
 | `docs/design-system.md`（验收那一步） | 曾提到用两个已移除的截图脚本做验收 —— 那套截图工作流已随开源一起删掉；现在写的是「视觉改动自己截图看一眼」，验收方法指向 [verifying.md](verifying.md) | **已修** |
 | `src/views/DevGuideView.vue`（内核能力清单里的组件库那条） | 写着「Element Plus 已全量注册」—— 实际是 `unplugin-vue-components` 按需引入（`vite.config.ts` + `src/main.ts` 的注释），`main.ts` 里没有 `app.use(ElementPlus)` | **未修**（一句话的事，但改它要同时确认那一段的其它说法） |
-| 全仓引用小写的 `docs/architecture.md` | 本文档已落定为 **`docs/ARCHITECTURE.md`**（大写）。Windows 上大小写不敏感、照旧能打开；Linux/macOS 或 GitHub 网页上会 404。**当时实际剩 8 处**（`docs/文件传输.md`、`server/config.example.json`、`server/lib/transfer/README.md`、三个 `.vue` / `.mjs` 字符串字面量），逐条改成大写后全仓为 0 | **已修**（2026-09-27） |
+| 全仓对本文档的引用大小写 | 本文档的正式名字是 **`ARCHITECTURE.md`**（大写）：Windows 上大小写不敏感、照旧能打开，Linux/macOS 或 GitHub 网页上小写会 404。全仓引用（文档、配置模板、脚本、页面文案）已统一为大写 | **已修**（2026-09-27） |
 
 > ⚠️ 这张表**原来那版数错了**：它写「全仓 10 处」并点名 `docs/PRIVACY.md` 的三处小写链接，
 > 而那三处早就是大写 —— 原因是统计时用了 `grep -i`，把**已经正确的大写引用**也数了进去。

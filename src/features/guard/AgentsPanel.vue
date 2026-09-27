@@ -8,7 +8,8 @@
  *   · 树**走到 shell 为止** —— 否则 GUI 型客户端一个会话会把「半天里跑过的所有进程」都算进去。
  *   · 「结束整个会话」逐个成员过保护层，被拒的成员写明原因；这个口子**不给智能体**（MCP 里没有）。
  */
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
+import { usePolling } from '@/core/polling'
 import { api } from '@/core/sidecar'
 
 const loading = ref(false)
@@ -16,7 +17,8 @@ const busy = ref('')
 const err = ref('')
 const data = ref<any>(null)
 const log = ref<any>(null)
-let timer: ReturnType<typeof setInterval> | null = null
+// 智能体会话列表轮询走统一轮询助手（页面不可见时自动暂停，卸载自动停）
+const poll = usePolling(() => load(), 10000)
 
 async function load(showLoading = false) {
   if (showLoading) loading.value = true
@@ -83,10 +85,7 @@ async function endSession(s: any) {
 
 onMounted(() => {
   load(true)
-  timer = setInterval(() => load(), 10000)
-})
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
+  poll.start()
 })
 </script>
 

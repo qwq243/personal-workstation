@@ -52,7 +52,7 @@ function usage(code = 0) {
                       的真实导出；缺省用 Grid。
   --group <组>        归组：${GROUPS.join(' / ')}。不填 = 置顶入口（不参与分组）
   --order <数字>      组内排序，越小越靠前。缺省自动取该组当前最大值 +1
-  --path <路由>       首页路由，缺省 /<id>
+  --path <路由>       首页路由，形如 /reading（以 / 开头、单个小写单词段），缺省 /<id>
   --api               连边车一起生成（server/lib/<id>.mjs + 路由 + 客户端方法）
   --config            连配置一起生成（DEFAULTS + 白名单 + config.example.json）
   --dry-run           只打印会改哪些文件，不落盘
@@ -163,7 +163,15 @@ const ids = new Set(existing.map((m) => m.id))
 const allPaths = new Set(mods.flatMap((m) => m.routes.map((r) => r.path)))
 const allRouteNames = new Set(mods.flatMap((m) => m.routes.map((r) => r.name)))
 
-const routePath = f.path ? (f.path.startsWith('/') ? f.path : `/${f.path}`) : `/${id}`
+const routePath = f.path ?? `/${id}`
+// --path 只接受「以 / 开头的单个小写单词段」：Git Bash 会把 `/plan` 这类参数改写成
+// `C:/Program Files/Git/plan`，不拦的话生成出来是一条永远打不开的路由。
+if (f.path !== undefined && !/^\/[a-z][a-z0-9-]*$/.test(f.path)) {
+  problems.push(
+    `--path 不合法：${f.path}（只接受 /reading 这种形式；Git Bash 会把 /reading 改写成 ` +
+      `C:/Program Files/Git/reading，先加 MSYS_NO_PATHCONV=1 再跑）`,
+  )
+}
 if (ids.has(id)) problems.push(`id 已被占用：${id}（已有模块：${[...ids].sort().join(', ')}）`)
 if (allPaths.has(routePath)) problems.push(`路由已被占用：${routePath}`)
 if (allRouteNames.has(`${id}-home`)) problems.push(`路由 name 已被占用：${id}-home`)
@@ -452,17 +460,25 @@ if (selfCheck.length) {
   for (const s of selfCheck) console.error(`   ✗ ${s}`)
 }
 
-console.log(
-  [
-    '',
-    '下一步：',
-    '  npm run build && npm run typecheck && npm test',
+const next = ['', '下一步：', '  npm run build && npm run typecheck && npm test']
+if (f.config) {
+  // 带 --config 时 visible() 是 cfgFilled('<camel>.dir')，而新分节的值是空串 ⇒ 模块默认不显示。
+  // 设置页是硬编码表单，没有这一项的输入框，所以只能改配置或改 visible —— 别只说「打开侧边栏看条目」。
+  next.push(
+    `  ⚠ ${cfg.camel}.dir 还是空串，而 visible() 只看它 —— 现在侧边栏里**看不到**新模块，这不是出错。`,
+    '    要让它显示，二选一：',
+    `    ① 在 server/config.json 里加 "${cfg.camel}": { "dir": "<库目录的绝对路径>" }，重启边车；`,
+    `    ② 或把 src/features/${id}/module.ts 的 visible 改成 () => true（不需要「没配就不显示」的话）。`,
+    '    改完刷新页面。',
+  )
+} else {
+  next.push(
     '  npm run dev:all                     # 打开侧边栏看新条目',
     `侧边栏 / 首页的条目数应该从 ${afterReg.registered.size - 1} 变成 ${afterReg.registered.size}。`,
-    `要撤掉这次生成：删掉 src/features/${id}/ 目录${f.api ? ` 与 server/lib/${id}.mjs` : ''}，再按上面标「修改」的那几个文件手工回退。`,
-    '',
-  ].join('\n'),
-)
+  )
+}
+next.push(`要撤掉这次生成：删掉 src/features/${id}/ 目录${f.api ? ` 与 server/lib/${id}.mjs` : ''}，再按上面标「修改」的那几个文件手工回退。`, '')
+console.log(next.join('\n'))
 
 /* ------------------------------------------------------------- 自检 --- */
 

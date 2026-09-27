@@ -137,6 +137,8 @@ npm run dev:all    # 一条命令起两个：边车（后台）+ Vite（前台�
 > 1. 在 URL 上带 `?sidecar=127.0.0.1:5278`（临时试）；
 > 2. 建一个 `.env.local`，写 `VITE_SIDECAR_URL=http://127.0.0.1:5278`（长期）。
 
+**开机自启**（Windows 专有，桌面双击那条路）：`npm run autostart:on` 开、`npm run autostart:off` 关、`node scripts/panel-autostart.mjs status` 只体检 —— 都要求边车已经在跑，页面入口是「运行与自启」`#/service`。
+
 ### 端口
 
 | 端口 | 谁 | 怎么改 |

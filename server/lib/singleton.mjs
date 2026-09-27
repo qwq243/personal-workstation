@@ -138,7 +138,9 @@ export async function enforce({ port = 5278, log = () => {} } = {}) {
     // 有一种情况会走到这里，但不是「别人的进程」：旧实例是用**相对路径**起的
     // （`cd 工程目录 && node server/index.mjs`），命令行里没有绝对路径可认。
     // 拿不准就不动手（见文件头第 1 条），但要把话说清楚，别让人以为端口被陌生程序占了。
-    const hint = foreign.some((f) => /(^|[\\/])server[\\/]index\.mjs/i.test(String(f.cmd)))
+    // 判据要认「空格分隔」：真实命令行是 `node.exe server/index.mjs`，`server` 前面是空格不是斜杠。
+    // 这里只决定提示文案，**不动手**；自动回收那条判据另有一套绝对路径规则，别拿这条去放宽它。
+    const hint = foreign.some((f) => /(^|[\s\\/])server[\\/]index\.mjs/i.test(String(f.cmd)))
       ? '其中有的命令行只写了相对的 server/index.mjs —— 那**很可能就是本项目**的另一份/旧一份实例，' +
         '但相对路径认不出是哪一份，所以这里不动手。用 `tasklist` 看它的 PID，确认后自己结束；' +
         '或者干脆改 config.json 的 port。'

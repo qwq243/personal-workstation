@@ -65,7 +65,7 @@ export interface WorkstationModule {
 ### 1.2 路由与导航是怎么派生的
 
 - **路由表** = 内核固定的几条（`src/router/index.ts` 的 `coreRoutes`：`/` 重定向到 `/dashboard`、`/apps`、`/settings`、`/dev-guide`、404）**+** `collectRoutes()`。用 **hash 模式**（`createWebHashHistory`），静态部署不需要任何重写规则。
-- **懒加载是硬要求**：`component: () => import('./Xxx.vue')`。现有 8 个模块共 **24 条路由**，组件**全部**是懒加载，没有一个是静态 import —— 静态 import 会把整个模块塞进首屏包。（wiki 的 9 条路由里有 6 条复用同一个 `const WORKSPACE = () => import('./WikiWorkspace.vue')`，先定义再引用，同样是懒加载。）
+- **懒加载是硬要求**：`component: () => import('./Xxx.vue')`。现有 9 个模块共 **25 条路由**，组件**全部**是懒加载，没有一个是静态 import —— 静态 import 会把整个模块塞进首屏包。（wiki 的 9 条路由里有 6 条复用同一个 `const WORKSPACE = () => import('./WikiWorkspace.vue')`，先定义再引用，同样是懒加载。）
 - **二级导航**：模块 `routes` 里带 `meta.title` 且没有 `meta.hideInNav` 的路由，会自动出现在侧边栏该模块下面（`src/shell/AppShell.vue` 的 `subNav`）。**子页面排序 = routes 数组顺序**（`src/features/vocab/module.ts` 就靠这个把「每日一句」排在单词页前面）。
 - **单页模块**：只有一个页面的模块，惯例是给唯一那条路由加 `meta.hideInNav: true`，避免二级菜单里出现一个和一级同名的项（见 `plan` / `calendar` / `usage` / `guard` / `memo`）。
 - **激活态**：`AppShell` 按「最长前缀匹配」决定高亮哪个模块（`AppShell.vue` 的 `activeModuleId`），不是取路径第一段 —— 所以子路由挂在 `/wiki/...`、`/wiki/p/:slug` 这种深层路径上也不会串。
@@ -356,6 +356,11 @@ npm run typecheck   # 更严的 vue-tsc（可选，但建议跑）
 npm run dev:all     # 起边车 + Vite，然后打开 Vite 给的地址看：侧栏有没有新条目、点进去是不是一页报错
 ```
 
+> 侧栏里**没有**新条目不一定是注册失败：第 6 步用了 `visible: () => cfgFilled('…')` 的模块，
+> 配置为空时按「没配 = 不显示」那条内核约定**本来就不出现**。要看见它，先去 `server/config.json`
+> 填上那一项（改完重启边车），或把 `visible` 改成 `() => true`。
+> 生成器带 `--config` 时会在收尾输出里把这一步再说一遍。
+
 > 开发态前端在 5273、边车在 5278，前端默认走同源相对路径 —— 记得在 URL 上加 `?sidecar=127.0.0.1:5278` 或建 `.env.local`（见 [README](../README.md) 的「快速开始」），否则你会看到一张「边车没连上」的卡片。
 
 对照 [verifying.md](verifying.md) 里「改到这几块时的额外检查」那一节：注册表改动要确认「侧边栏条目数对不对」以及「没配的模块确实不在」。
@@ -448,7 +453,7 @@ export const api = {
 
 ### 3.4 如果它需要配置项
 
-**三处，缺一不可**（漏一处不会报错，只会在某个地方表现为「改不动」或「别人不知道有这一项」）：
+**三处必改 + 一处按需**（漏一处不会报错，只会在某个地方表现为「改不动」「页面上没有这一项」或「别人不知道有这一项」）：
 
 1. **`server/config.mjs` 的 `DEFAULTS`** —— 加一节（默认值一律**中性**：路径给空串、开关给保守值），例如：
    ```js
@@ -468,11 +473,16 @@ export const api = {
    ['reading', 'apiKey'],
    ```
    这样保存时它会自动落到 `server/credentials.json`，`/api/config` 返回时自动脱敏成 `****后四位`；`saveConfig` 也会把脱敏串与空串当成「不改」，避免一次保存把真值冲掉。
+4. **「设置与数据」页上的输入框**（要能在页面上改时才加）—— 白名单只管**服务端**放不放行：
+   页面那一栏是**硬编码表单**（`src/views/SettingsView.vue` 里一节一节手写的 `el-input` / 下拉），
+   **不按白名单派生**。所以进了白名单的新字段，页面上**不会自动长出输入框**，
+   得去那个文件加控件、把它并进该节 `save...()` 发给 `api.patchConfig()` 的那份 patch；
+   不加就只能手改 `server/config.json`（手改要重启边车才生效，见 [CONFIG.md](CONFIG.md) §9.1）。
 
 **不要**把默认值写成某台机器上的绝对路径、也不要写进 `config.example.json` 之外的任何地方；`config.example.json` 里要同步补一条带说明的项（贡献约定见 README）。
 路径一律写**正斜杠**（反斜杠会被 JSON 当转义吃掉，见 `server/config.example.json` 里那条 `startupDir` 的教训）。
 
-**第四处是白拿的**：加完跑 `npm test`。`scripts/tests/config-whitelist.test.mjs` 会把
+**这之后是白拿的**：加完跑 `npm test`。`scripts/tests/config-whitelist.test.mjs` 会把
 `DEFAULTS` / 两张白名单 / `config.example.json` 三方对账，上面任何一步漏了它都会红并点名，
 逐项说明见 [CONFIG.md §10](CONFIG.md)。
 
@@ -533,7 +543,7 @@ path.join(dataDir(), 'reading-notes.json')
 
 > ⚠️ 一个坑：把 `dataDir` 写成**空串不等于回默认** —— `dataDir()` 会原样返回空串，`path.join('', 'x.json')` 就是相对路径，数据会落到**进程的 cwd** 下。要回默认就删掉这一项，别写成 `""`（[CONFIG.md](CONFIG.md) §9 里有同样的提醒）。
 
-> 仓库里有几个较早的 lib 自己复制了一份同样的表达式（`plan.mjs` / `vocab.mjs` / `summaries.mjs` / `pguard.mjs` / `usage-cache.mjs` 里各有一个模块内 `dataDir()`）。那是历史遗留，**新代码请从 `config.mjs` 导入**，别再复制。
+> 仓库里有几个较早的 lib 自己复制了一份同样的表达式（`plan.mjs` / `vocab.mjs` / `summaries.mjs` / `usage-cache.mjs` 里各有一个模块内 `dataDir()`）。那是历史遗留，**新代码请从 `config.mjs` 导入**，别再复制。
 > 另外，`jsonstore.mjs` 自己不做路径拼接 —— 它只接受一个返回绝对路径的 `file()` 函数。
 
 ### 4.2 `createJsonStore` 的六个参数

@@ -10,7 +10,7 @@
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
-import { loadConfig, saveConfig, publicConfig, migrateScopedConfig, syncConfigMirrors, CONFIG_PATH, ROOT_DIR, SERVER_DIR, DEFAULTS } from './config.mjs'
+import { loadConfig, saveConfig, publicConfig, migrateScopedConfig, syncConfigMirrors, dataDir, CONFIG_PATH, ROOT_DIR, DEFAULTS } from './config.mjs'
 import { CONFIG_EDITABLE, CONFIG_EDITABLE_SCALARS } from './lib/config-editable.mjs'
 import { request, spawnHidden } from './lib/net.mjs'
 import * as pguard from './lib/pguard.mjs'
@@ -146,13 +146,14 @@ route('GET', /^\/api\/health$/, async () => ({
  *  5. 服务状态与 AI 上下文复用同一个 serviceStatus() Promise，不再一次查两遍。
  *  ?force=1 是唯一现场重拉的路径（设置页/排查用）。 */
 const OVERVIEW_TTL = 20000
-const OVERVIEW_FILE = path.join(SERVER_DIR, 'data', 'cache', 'overview.json')
+/** 磁盘缓存路径走 dataDir()（认 WS_DATA_DIR 与 config.json 的 dataDir），别写死仓库内 */
+const overviewFile = () => path.join(dataDir(), 'cache', 'overview.json')
 let overviewCache = { at: 0, value: null }
 let overviewRefreshing = false
 
 function loadOverviewDisk() {
   try {
-    const j = JSON.parse(fs.readFileSync(OVERVIEW_FILE, 'utf8'))
+    const j = JSON.parse(fs.readFileSync(overviewFile(), 'utf8'))
     if (j && typeof j.at === 'number' && j.value) return j
   } catch {}
   return null
@@ -162,8 +163,9 @@ overviewCache = loadOverviewDisk() ?? overviewCache
 function saveOverviewDisk() {
   if (!overviewCache.value) return
   try {
-    fs.mkdirSync(path.dirname(OVERVIEW_FILE), { recursive: true })
-    fs.writeFileSync(OVERVIEW_FILE, JSON.stringify(overviewCache))
+    const file = overviewFile()
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify(overviewCache))
   } catch (err) {
     console.warn('[overview] 磁盘缓存写入失败:', err.message)
   }

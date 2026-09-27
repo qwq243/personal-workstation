@@ -125,7 +125,6 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 | `newapi.token` | `''`（**敏感**） | 面板系统令牌 | 「还没填 NewAPI 面板令牌」 |
 | `ai.model` | `''` | 默认对话模型名 | AI 相关功能会报错（没模型可调） |
 | `ai.models` | `[]` | 可选模型清单（问答页 / 随记页的下拉用） | 只显示 `ai.model` 一个 |
-| `ai.maxTokens` | `1500` | 单次回答的 token 上限（**注意**：模型类调用现在统一走 `server/lib/llm.mjs` 的预算守卫，那里按输入体量算并允许放大；这个值只在少数直连处生效） | — |
 | `ai.temperature` | `0.6` | 采样温度 | — |
 | `ai.persona` | `'服务对象是一名在校大学生'` | 系统提示词里「服务对象」那半句（**中性默认，谁用谁改**） | 代码里还有一份同样的兜底（`ai.mjs:107`） |
 | `ai.personaPrivate` | `''`（**敏感**） | 可选的补充身份（学校 / 专业…），落 `credentials.json` | 不拼进提示词 |
@@ -172,7 +171,7 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 | 字段 | 默认 | 含义 | 留空会怎样 |
 |---|---|---|---|
 | `pguard.enabled` | `true` | 边车启动时是否拉起引擎（关掉后页面上仍可手动启动） | — |
-| `pguard.dataDir` | `''` | 引擎数据目录（配置 / 审计 / 日志） | 空 = `SERVER_DIR/data/pguard`（**注意**：这条不走 `dataDir()`，见 §9.2） |
+| `pguard.dataDir` | `''` | 引擎数据目录（配置 / 审计 / 日志） | 空 = `<dataDir>/pguard`（跟随 `dataDir()`，见 §9.2） |
 
 出厂是**演练模式**（`dryRun: true`，写在引擎自己的配置里，不在这个文件）：
 照常评估、照常写审计，但不动手。
@@ -296,7 +295,7 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 | 分节 | 放行的字段 |
 |---|---|
 | `newapi` | `baseUrl` |
-| `ai` | `model` `models` `maxTokens` `temperature` `persona` `personaPrivate` |
+| `ai` | `model` `models` `temperature` `persona` `personaPrivate` |
 | `workstation` | `autostartEntry` `autostartLog` |
 | `pguard` | `enabled` `dataDir` |
 | `llm` | `activePresetId` `configs` `keys` `customPresets` `taskRouting` `reasoning` `maxContextSize` |
@@ -512,11 +511,9 @@ grep -rniE "sk-[a-z0-9]{16,}|C:\\\\Users|D:\\\\|/Users/" --include='*.json' --in
 ### 9.2 `dataDir` / `WS_DATA_DIR` 现在推不动全部模块
 
 `server/config.mjs` 导出了 `dataDir()` 当唯一入口，但仓库里**只有一部分模块真的走它**。
-完整的分裂清单（谁认、谁不认、谁干脆写死在仓库里）见
-[ARCHITECTURE.md §6.4](ARCHITECTURE.md)。
-结论：**要挪数据目录，改 `config.json` 的 `dataDir`**，并且知道
-`server/data/cache/overview.json`（`index.mjs:148`）与 `dataDir/pguard`（`pguard.mjs:46-48`）
-这两份搬不走。
+完整的分裂清单（谁认、谁不认）见 [ARCHITECTURE.md §6.4](ARCHITECTURE.md)。
+结论：**要挪数据目录，改 `config.json` 的 `dataDir`** —— 第三类模块只认它、不认 `WS_DATA_DIR`；
+`WS_DATA_DIR` 是给测试脚本用的（把数据写到别处、不碰真实数据），别指望它搬走全部数据。
 
 ### 9.3 别整份抄 `config.example.json`
 

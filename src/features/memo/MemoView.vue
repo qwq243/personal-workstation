@@ -12,10 +12,11 @@
  *  2. **没配就不显示**：转写端点没填时这个模块会从侧边栏消失（core/appconfig.ts 的约定），
  *     直接敲 `#/memo` 进来则看到下面的配置引导卡，而不是一个报错。
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import SidecarOffline from '@/components/SidecarOffline.vue'
 import MdLite from '@/components/MdLite.vue'
+import { usePolling } from '@/core/polling'
 import { api, ensureSidecar, memoSummarizeStream } from '@/core/sidecar'
 
 const ready = ref(false)
@@ -69,7 +70,10 @@ const streamPhase = ref('')
 const streamStages = ref<{ index: number; total: number; title: string }[]>([])
 const showReasoning = ref(false)
 let streamCtl: AbortController | null = null
-let jobTimer: ReturnType<typeof setInterval> | null = null
+/** 正在轮询的那个任务 id（转写是分钟级的，所以走「起任务 + 轮询」） */
+let jobId = ''
+// 转写任务轮询走统一轮询助手（页面不可见时自动暂停，卸载自动停）；起停时机由起任务 / 终态掌握
+const jobPoll = usePolling(tickJob, 1500, { immediate: true })
 
 const hasRecords = computed(() => records.value.length > 0)
 const asrReady = computed(() => !!asr.value?.configured)
@@ -137,29 +141,25 @@ async function init() {
 /* ------------------------------------------------------------ 任务：转写 --- */
 
 function pollJob(id: string) {
-  stopPoll()
-  const tick = async () => {
-    const r = await api.memoJob(id)
-    if (!r.ok) return
-    activeJob.value = r.data?.job ?? activeJob.value
-    const st = activeJob.value?.status
-    if (st && st !== 'running') {
-      stopPoll()
-      // 转写结束后记录才落盘，这里重新拉一次列表并打开它
-      await loadRecords()
-      await loadStatus()
-      if (activeJob.value?.recordId) await open(activeJob.value.recordId)
-      if (st === 'done') ElMessage.success('转写完成')
-      else ElMessage.error(activeJob.value?.error ?? '转写失败')
-    }
-  }
-  void tick()
-  jobTimer = setInterval(tick, 1500)
+  jobId = id
+  jobPoll.stop()
+  jobPoll.start()
 }
 
-function stopPoll() {
-  if (jobTimer) clearInterval(jobTimer)
-  jobTimer = null
+async function tickJob() {
+  const r = await api.memoJob(jobId)
+  if (!r.ok) return
+  activeJob.value = r.data?.job ?? activeJob.value
+  const st = activeJob.value?.status
+  if (st && st !== 'running') {
+    jobPoll.stop()
+    // 转写结束后记录才落盘，这里重新拉一次列表并打开它
+    await loadRecords()
+    await loadStatus()
+    if (activeJob.value?.recordId) await open(activeJob.value.recordId)
+    if (st === 'done') ElMessage.success('转写完成')
+    else ElMessage.error(activeJob.value?.error ?? '转写失败')
+  }
 }
 
 /** 上传 + 起任务。两步分开：上传走二进制，起任务走 JSON */
@@ -387,7 +387,6 @@ async function savePrompts() {
 }
 
 onMounted(init)
-onUnmounted(stopPoll)
 </script>
 
 <template>

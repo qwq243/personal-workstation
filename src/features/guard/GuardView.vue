@@ -13,9 +13,10 @@
  *     （点一次弹一次 UAC）。
  *  3. **提权进程动不了**：释放内存 / 结束进程只能碰你本人、非提权的进程（实测提权的报 err5）。
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import SidecarOffline from '@/components/SidecarOffline.vue'
+import { usePolling } from '@/core/polling'
 import { api, ensureSidecar } from '@/core/sidecar'
 import PortsPanel from './PortsPanel.vue'
 import AgentsPanel from './AgentsPanel.vue'
@@ -30,7 +31,8 @@ const procs = ref<any>(null)
 const rows = ref<any[]>([])
 const logTail = ref<string[]>([])
 const onlyActed = ref(false)
-let timer: ReturnType<typeof setInterval> | null = null
+// 概览轮询走统一轮询助手（页面不可见时自动暂停，卸载自动停）
+const poll = usePolling(() => load(), 12000)
 
 const conf = computed(() => st.value?.config ?? null)
 const dryRun = computed(() => st.value?.dryRun !== false)
@@ -339,10 +341,7 @@ async function toggleEntry(list: 'whitelist' | 'blacklist', index: number) {
 
 onMounted(async () => {
   await load(true)
-  timer = setInterval(() => load(), 12000)
-})
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
+  poll.start()
 })
 </script>
 

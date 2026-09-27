@@ -9,7 +9,7 @@
 `src/features/` 下**没有任何 glob / 自动扫描**：模块靠 `src/features/index.ts` 里
 一条条 `registerModule(...)` 显式登记（`src/main.ts` 只调用 `registerAllModules()`）。
 所以这个目录躺在那里既不会被注册、也不会出现在侧边栏。
-下划线前缀只是给人和生成器看的约定（生成器会拒绝 `--id _template`，也不允许 id 以下划线开头）。
+下划线前缀只是给人和生成器看的约定（id 是位置参数，`node scripts/new-feature.mjs _template` 会被生成器中止；也不允许 id 以下划线开头）。
 
 > 反过来说：**新建的模块目录也不会自动注册** —— 必须去 `src/features/index.ts` 加两行
 > （生成器会自动加；手抄的话见 [docs/EXTENDING.md](../../../docs/EXTENDING.md) §2 第 4 步）。

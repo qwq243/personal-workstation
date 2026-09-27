@@ -9,6 +9,7 @@
  * 这里统一处理令牌（401 自动重取一次）、超时与中文错误文案。见 docs/EXTENDING.md §3.3。
  */
 import { ref } from 'vue'
+import { readSseStream } from './sse'
 
 /**
  * 边车地址。
@@ -506,6 +507,8 @@ export type MemoSummaryEvent =
 /**
  * 语音随记的流式总结：边生成边回调 Markdown 增量，服务端在结束时已经解析并落盘。
  * 停止录音后走这条（不然要盯着空屏干等十几秒）；「重新总结」也走它。
+ *
+ * 读流那套（POST + 空行分帧 + 半帧容错）在 core/sse.ts，这里只管把失败翻成事件。
  */
 export async function memoSummarizeStream(
   id: string,
@@ -513,46 +516,16 @@ export async function memoSummarizeStream(
   signal?: AbortSignal,
   model = '',
 ): Promise<void> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  try {
-    const t = await ensureToken()
-    if (t) headers['X-WS-Token'] = t
-    const res = await fetch(`${base}/api/memo/summarize/stream`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ id, model }),
-      signal,
-    })
-    if (!res.ok) {
-      onEvent({ type: 'error', error: `边车返回 HTTP ${res.status}` })
-      return
-    }
-    if (!res.body) {
-      onEvent({ type: 'error', error: '边车没有返回流（当前环境不支持流式读取）' })
-      return
-    }
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buf = ''
-    for (;;) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      const frames = buf.split('\n\n')
-      buf = frames.pop() ?? ''
-      for (const frame of frames) {
-        const line = frame.split('\n').find((l) => l.startsWith('data:'))
-        if (!line) continue
-        try {
-          onEvent(JSON.parse(line.slice(5).trim()) as MemoSummaryEvent)
-        } catch {
-          /* 半帧：丢掉，下一轮会补全 */
-        }
-      }
-    }
-  } catch (err: any) {
-    if (err?.name !== 'AbortError') onEvent({ type: 'error', error: err?.message ?? '流式请求失败' })
-  }
+  await readSseStream(`${base}/api/memo/summarize/stream`, { id, model }, onEvent, {
+    signal,
+    getToken: ensureToken,
+    onFailure: (f) => {
+      if (f.kind === 'http') onEvent({ type: 'error', error: `边车返回 HTTP ${f.status}` })
+      else if (f.kind === 'no-body') onEvent({ type: 'error', error: '边车没有返回流（当前环境不支持流式读取）' })
+      else if (f.kind === 'exception') onEvent({ type: 'error', error: f.error?.message ?? '流式请求失败' })
+      /* abort（自己点的停止）：静默，什么都不发 */
+    },
+  })
 }
 
 /* --------------------------------------------------- 连接状态（全局） --- */
@@ -617,7 +590,7 @@ export interface WikiChatEvent {
 
 /**
  * 知识库流式问答：边车把「检索 → 补检索 → 逐字作答」按帧下发。
- * 与测聊那条流同一套读法（不用 EventSource：它不能 POST、也带不了令牌头）。
+ * 与语音随记那条流同一套读法（都在 core/sse.ts）。
  */
 export async function wikiChatStream(
   body: {
@@ -645,49 +618,19 @@ export async function wikiChatStream(
   onEvent: (e: WikiChatEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  let headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  try {
-    const t = await ensureToken()
-    if (t) headers['X-WS-Token'] = t
-    const res = await fetch(`${base}/api/wiki/chat/stream`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal,
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      onEvent({ type: 'error', error: `边车返回 HTTP ${res.status}${text ? `：${text.slice(0, 200)}` : ''}` })
-      return
-    }
-    if (!res.body) {
-      onEvent({ type: 'error', error: '边车没有返回流（当前环境不支持流式读取）' })
-      return
-    }
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buf = ''
-    for (;;) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      const frames = buf.split('\n\n')
-      buf = frames.pop() ?? ''
-      for (const frame of frames) {
-        const line = frame.split('\n').find((l) => l.startsWith('data:'))
-        if (!line) continue
-        try {
-          onEvent(JSON.parse(line.slice(5).trim()) as WikiChatEvent)
-        } catch {
-          /* 半帧：丢掉，下一轮会补全 */
-        }
+  await readSseStream(`${base}/api/wiki/chat/stream`, body, onEvent, {
+    signal,
+    getToken: ensureToken,
+    onFailure: (f) => {
+      if (f.kind === 'http') {
+        onEvent({ type: 'error', error: `边车返回 HTTP ${f.status}${f.text ? `：${f.text.slice(0, 200)}` : ''}` })
+      } else if (f.kind === 'no-body') {
+        onEvent({ type: 'error', error: '边车没有返回流（当前环境不支持流式读取）' })
+      } else if (f.kind === 'abort') {
+        onEvent({ type: 'end' })
+      } else if (f.kind === 'exception') {
+        onEvent({ type: 'error', error: f.error?.message ?? '流式请求失败' })
       }
-    }
-  } catch (err: any) {
-    if (err?.name === 'AbortError') {
-      onEvent({ type: 'end' })
-      return
-    }
-    onEvent({ type: 'error', error: err?.message ?? '流式请求失败' })
-  }
+    },
+  })
 }

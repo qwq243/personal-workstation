@@ -6,7 +6,8 @@
  * 「结束」先过工作台的保护层（server/lib/procscan.mjs），被拒的按钮禁用并写明原因；
  * 每次结束都写 data/procscan-actions.jsonl。
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { usePolling } from '@/core/polling'
 import { api } from '@/core/sidecar'
 
 const loading = ref(false)
@@ -15,8 +16,9 @@ const err = ref('')
 const data = ref<any>(null)
 const listenOnly = ref(true)
 const q = ref('')
-let timer: ReturnType<typeof setInterval> | null = null
 let debounce: ReturnType<typeof setTimeout> | null = null
+// 端口列表轮询走统一轮询助手（页面不可见时自动暂停，卸载自动停）
+const poll = usePolling(() => load(), 8000)
 
 const items = computed(() => data.value?.items ?? [])
 
@@ -63,10 +65,7 @@ async function endIt(row: any) {
 
 onMounted(() => {
   load(true)
-  timer = setInterval(() => load(), 8000)
-})
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
+  poll.start()
 })
 </script>
 

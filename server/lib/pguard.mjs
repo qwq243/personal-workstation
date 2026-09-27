@@ -28,12 +28,10 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { loadConfig } from '../config.mjs'
+import { dataDir as baseDataDir, loadConfig } from '../config.mjs'
 import { runHidden, sleep } from './net.mjs'
 import { killProcess, machineCpuPercent, closeWindows, foregroundPid, purgeStandbyList, snapshot, topByCpu, trimProcesses } from './procs.mjs'
 
-const SERVER_DIR = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 /** 审计文件最多读这么多（再多就只统计尾部） */
 const JOURNAL_TAIL_BYTES = 4 * 1024 * 1024
 /** 引擎自己那本人类可读的流水账，超过就轮转一次 */
@@ -41,9 +39,13 @@ const LOG_MAX_BYTES = 2 * 1024 * 1024
 
 /* --------------------------------------------------------------- 路径 --- */
 
+/**
+ * 引擎数据目录：`pguard.dataDir` 显式配了就用它，否则 = `<dataDir>/pguard`。
+ * 没配时跟随 config.mjs 的统一入口（`WS_DATA_DIR` 与 config.json 的 dataDir 都认）。
+ */
 export function dataDir() {
   const conf = loadConfig().pguard ?? {}
-  return conf.dataDir ? String(conf.dataDir) : path.join(SERVER_DIR, 'data', 'pguard')
+  return conf.dataDir ? String(conf.dataDir) : path.join(baseDataDir(), 'pguard')
 }
 export function configPath() {
   return path.join(dataDir(), 'config.json')

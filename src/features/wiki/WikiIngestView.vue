@@ -6,8 +6,9 @@
  * 文档默认走**云端解析**（MinerU）：能出真表格、抽图片、OCR 扫描件；云端不可用时自动回落本地通道。
  * 页面上明确标注「文档会上传云端」—— 不偷偷传。
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { usePolling } from '@/core/polling'
 import { api } from '@/core/sidecar'
 import { pendingRaw, refresh, refreshQueue, queue as queueRef, status } from './store'
 import WikiShell from './WikiShell.vue'
@@ -20,7 +21,6 @@ const busy = ref('')
 const watch = ref<any>(null)
 const env = ref<any>(null)
 const watchForm = ref({ dirsText: '', enabled: false, autoIngest: false, intervalMin: 30, maxFileSizeMb: 100 })
-let timer: ReturnType<typeof setInterval> | null = null
 
 const queue = computed(() => queueRef.value)
 const STATUS: Record<string, { text: string; type: 'info' | 'success' | 'warning' | 'danger' }> = {
@@ -146,6 +146,8 @@ async function scanNow() {
 async function poll() {
   await refreshQueue()
 }
+// 队列轮询走统一轮询助手（页面不可见时自动暂停，卸载自动停）
+const queuePoll = usePolling(poll, 3000)
 function fmt(iso: string) {
   return iso ? String(iso).slice(5, 16).replace('T', ' ') : ''
 }
@@ -156,10 +158,7 @@ onMounted(async () => {
   await loadWatch()
   const e = await api.wikiEnvironment()
   env.value = e.ok ? e.data : null
-  timer = setInterval(poll, 3000)
-})
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
+  queuePoll.start()
 })
 </script>
 
