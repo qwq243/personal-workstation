@@ -54,7 +54,7 @@ function snapshotScript(pidList, withThreads) {
   // （2026-09-23 实测）。引擎不需要它，所以默认不算。
   return `$ErrorActionPreference = 'SilentlyContinue'
 # stdout 必须是 UTF-8：默认按控制台代码页（本机 936）输出，命令行里的中文路径到 Node 那头
-# 就成乱码 —— 而 cmd 要拿来做白名单匹配，中文匹配值（如「图书馆比赛」）会静默失效（2026-09-23 实测）。
+# 就成乱码 —— 而 cmd 要拿来做白名单匹配，中文匹配值（如「某个中文服务名」）会静默失效（2026-09-23 实测）。
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 $procs = @(Get-Process)
 $rows = New-Object System.Collections.ArrayList

@@ -23,11 +23,11 @@ const steps = [
 /** 数据源要自己接的几处：这里只给「接哪儿、怎么写」，不预置任何别人的实现 */
 const slots = [
   {
-    t: '教务（课表 / 成绩 / 签到）',
-    d: '依赖你所在学校的接口与个人身份，所以仓库里没有带。写一个 server/lib/<你的教务>.mjs 当客户端，再按上面第 4 步接上即可。',
+    t: '校方系统（课表 / 成绩 / 签到）',
+    d: '依赖你所在学校的接口与个人身份，所以仓库里没有带。写一个 server/lib/<你的校方客户端>.mjs 当客户端，再按上面第 4 步接上即可。',
   },
   {
-    t: '文件传输（手机 ↔ 电脑）',
+    t: '文件传输（移动设备 ↔ 电脑）',
     d: '接口约定与一个空的 provider 目录已经留好：docs/文件传输.md。WebDAV / S3 / rclone 都能接，注意上传下载要做成「起任务 + 轮询」。',
   },
   {
@@ -117,7 +117,7 @@ export const readingModule: WorkstationModule = {
         </li>
       </ul>
       <div class="ws-dim" style="margin-top: 12px">
-        更完整的说明在仓库的 <code class="ws-mono">docs/architecture.md</code>（三分法、配置分层、
+        更完整的说明在仓库的 <code class="ws-mono">docs/ARCHITECTURE.md</code>（三分法、配置分层、
         以及从删掉的模块里留下的设计教训）与 <code class="ws-mono">docs/verifying.md</code>（改完怎么验）。
       </div>
     </div>

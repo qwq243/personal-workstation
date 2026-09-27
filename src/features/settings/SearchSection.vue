@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * 设置 · 网络搜索与本地文件检索（按已退役桌面端那套移植）。
+ * 设置 · 网络搜索与本地文件检索。
  *
- * 7 家 provider 的字段与提示照搬那套实现：需要 key 的四家（tavily/serpapi/brave/bocha）、
+ * 7 家 provider 的字段与提示按各家公开文档写：需要 key 的四家（tavily/serpapi/brave/bocha）、
  * 一个只要 URL 的（searxng）、一个可匿名可带 key 的（firecrawl）、一个要 key 但要 ollama.com 的（ollama）。
  * 另有「本机文件」：AnyTXT 的 JSON-RPC 服务（未装时这里会明确说连不上，不会假装搜到了）。
  *
@@ -99,8 +99,8 @@ onMounted(load)
         <span class="wk-chip" :class="data?.ready ? 'wk-chip--ok' : 'wk-chip--warn'">{{ data?.ready ? '已就绪' : '未配置' }}</span>
       </div>
       <p class="wk-card__desc">
-        <b>全站共用的检索配置</b>。问答时可以把网络结果一并作为材料（在问答页勾选「网络」）。各家协议与上限都按桌面端实现：
-        Bocha 最多 50 条、其余 20 条；<b>本机网络实测 Tavily 与 Brave 不通</b>，firecrawl / bocha / serpapi / ollama.com 通。
+        <b>全站共用的检索配置</b>。问答时可以把网络结果一并作为材料（在问答页勾选「网络」）。各家的协议与结果上限见下面 provider 列表：
+        部分 provider 在受限网络下可能不可达，按提示换一家即可。
       </p>
 
       <div class="st__grid-search">

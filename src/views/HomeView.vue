@@ -1,11 +1,11 @@
 <script setup lang="ts">
-/** 全部应用：功能卡片由注册表自动生成，按大模块（学习 / 待办 / 教务）分组。 */
+/** 全部应用：功能卡片由注册表自动生成，按大模块（学习 / 待办 / 校内）分组。 */
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { getGroupedModules, getPinnedModules } from '@/core/registry'
 
 const router = useRouter()
-/** 置顶入口（每日看板） */
+/** 置顶入口（进程守护 / 运行与自启）：没有 category 的模块 */
 const pinned = computed(() => getPinnedModules())
 /** 大模块分组 */
 const groups = computed(() => getGroupedModules())
@@ -25,7 +25,7 @@ function open(path: string) {
       <div class="hero__text">
         <h1 class="hero__title">全部应用</h1>
         <p class="hero__sub">
-          工作站的功能按大模块归好了：成长、办公、学习、待办、教务。每天进来先看每日看板，人怎么走看成长。
+          工作站的功能按大模块归好了：成长、办公、学习、待办、校内。每天进来先看每日看板，人怎么走看成长。
         </p>
       </div>
       <div class="hero__stat">

@@ -3,7 +3,7 @@
  *
  * 通用版：按文件名给状态、开关，并能写出 VBS 内容。
  *
- * ⚠️ VBS 编码是整个功能最容易踩的坑，实测结论（2026-09-20，本机 cscript 验证）：
+ * ⚠️ VBS 编码是整个功能最容易踩的坑，实测结论：
  *
  *   | 文件编码            | wscript 解析中文路径 | 结果 |
  *   |---------------------|----------------------|------|
@@ -12,10 +12,9 @@
  *   | UTF-16LE 带 BOM     | 正确                 | ✓ |
  *   | GBK (ANSI/936)      | 正确                 | ✓ |
  *
- * 所以**必须写 UTF-16LE + BOM**。曾经启动文件夹里那一条
- * 是 UTF-8 无 BOM，里面的中文路径（`C:\项目目录\...`）被解码成乱码，
- * `CurrentDirectory` 指向一个不存在的目录 —— 那个自启位其实一直没生效。
- * Node 直接 fs.writeFileSync 默认就是 UTF-8，正是这个坑的来源。
+ * 所以**必须写 UTF-16LE + BOM**。写成 UTF-8 无 BOM 时，脚本里的中文路径（`C:\某目录\...`）
+ * 会被按 ANSI(GBK) 解码成乱码，`CurrentDirectory` 指向一个不存在的目录 ——
+ * 自启位看着装好了，其实一直没生效。Node 直接 fs.writeFileSync 默认就是 UTF-8，正是这个坑的来源。
  */
 import fs from 'node:fs'
 import os from 'node:os'
@@ -76,7 +75,7 @@ export function writeVbs(name, content) {
 /**
  * 同上，但写到指定目录。
  *
- * 用途：本机安全策略禁止在**启动文件夹**新建 .vbs / .cmd（见 writeShortcut 的注释），
+ * 用途：Windows 的安全策略禁止在**启动文件夹**新建 .vbs / .cmd（见 writeShortcut 的注释），
  * 所以自启脚本本体落到仓库 scripts/ 下，启动文件夹里只放一个 .lnk 指过来。
  */
 export function writeVbsAt(dir, name, content) {
@@ -102,9 +101,9 @@ function psStr(s) {
 /**
  * 在启动文件夹里建/修一条 .lnk 快捷方式，返回 { ok, file, ... }。
  *
- * 为什么是 .lnk 而不是直接把 .vbs 放进启动文件夹（2026-09-23 实测，别再改回去）：
+ * 为什么是 .lnk 而不是直接把 .vbs 放进启动文件夹（Windows 上适用，别再改回去）：
  *
- *   本机安全策略**禁止在启动文件夹新建 .vbs / .cmd** —— Python 的 open、
+ *   安全策略**禁止在启动文件夹新建 .vbs / .cmd** —— Python 的 open、
  *   PowerShell 的 Copy-Item、以及「先建 .txt 再改名成 .vbs」全部报「拒绝访问」；
  *   .txt 与 .lnk 则放行。覆盖一个**已存在**的 .vbs 是允许的，所以老写法看着一直能用，
  *   一旦那条 .vbs 被删或改名成 .disabled，就再也装不回去了（自启静默丢失）。

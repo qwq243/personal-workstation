@@ -78,7 +78,7 @@ export const TOOLS = new Proxy({}, { get: (_t, k) => tools()[k] ?? '' })
 
 /** 直接读文本的扩展名（不走外部程序） */
 const PLAIN = new Set(['.md', '.markdown', '.mdx', '.txt', '.org', '.log', '.json', '.yaml', '.yml'])
-/** 支持导入的全部扩展名（与桌面端 sourceWatch 的 includeExtensions 对齐） */
+/** 支持导入的全部扩展名 */
 export const SUPPORTED = new Set([
   ...PLAIN,
   '.html', '.htm', '.csv', '.rtf',

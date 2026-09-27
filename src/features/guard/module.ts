@@ -1,8 +1,7 @@
 /**
- * 进程守护：CPU 越过阈值时释放开发工具进程的内存、结束失控进程，并按固定周期回收内存。
+ * 进程守护：CPU 越过阈值时释放开发工具进程的内存、结束失控进程，并按周期回收内存。
  *
- * 为什么独立成模块：它跟「服务与自启」是同一家族（本机后台服务：启停 + 状态），
- * 但它有自己的配置与审计日志，塞进那一页会把那页撑爆。放在置顶区，排在「服务与自启」后面。
+ * 入口 `#/process-guard`；引擎 `server/lib/pguard.mjs`，阈值与名单在 `server/data/pguard/config.json`。
  */
 import type { WorkstationModule } from '@/core/types'
 

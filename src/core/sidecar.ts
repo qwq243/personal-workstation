@@ -1,8 +1,12 @@
 /**
  * 边车（sidecar）API 客户端。
  *
- * 前端所有「外部数据」都从这里走：课表、待办、余额、日报、看板、AI。
+ * 前端所有「外部数据」都从这里走：看板与规划台、词单与每日一句、模型用量、
+ * 知识库、语音随记、进程与端口、以及工作站自己的自启位。
  * 边车不在时（没启动 / 端口被占），所有调用返回 { ok:false }，页面显示引导而不是崩掉。
+ *
+ * 加一条新调用的规矩：**只在这个文件的 `api` 对象里加**，别在页面里裸 `fetch` ——
+ * 这里统一处理令牌（401 自动重取一次）、超时与中文错误文案。见 docs/EXTENDING.md §3.3。
  */
 import { ref } from 'vue'
 
@@ -150,7 +154,9 @@ export const api = {
   newapiSpendToday: () => call('/api/newapi/spend/today', { timeout: 60000 }),
   newapiLogs: (pageSize = 30) => call(`/api/newapi/logs?pageSize=${pageSize}`, { timeout: 40000 }),
 
-  /* 工作站自身（面板） */
+  /* 工作站自身（面板）。页面在「运行与自启」`#/service` */
+  /** 当前边车进程：端口 / PID / node / 项目根 / 配置文件路径 */
+  panelSidecar: () => call('/api/panel/sidecar', { timeout: 15000 }),
   /** 面板状态 + 自启位体检（编码 / 路径 / 用的哪个 node） */
   panelStatus: () => call('/api/panel/status', { timeout: 15000 }),
   /** 面板自启位操作：enable（生成/修复）· disable · remove · open-startup */
@@ -246,7 +252,7 @@ export const api = {
 
   /* AI */
   aiSummary: (date?: string) => call('/api/ai/summary', { method: 'POST', body: { date }, timeout: 180000 }),
-  /** 今天的行动建议：由昨天的总结 + 今天的课表/待办/临近截止现算（单独存档） */
+  /** 今天的行动建议：由昨天的总结 + 今天的计划 / 记录 / 校历现算（单独存档） */
   aiToday: (date?: string) => call('/api/ai/today', { method: 'POST', body: { date }, timeout: 180000 }),
   /** 总结卡整包：回顾（三级降级）+ 今天的建议存档 */
   aiDaily: (date?: string) => call(`/api/ai/daily${date ? `?date=${date}` : ''}`),
@@ -349,7 +355,7 @@ export const api = {
   wikiAsk: (question: string, opts: { topK?: number; history?: { role: string; content: string }[] } = {}) =>
     call('/api/wiki/ask', { method: 'POST', body: { question, ...opts }, timeout: 240000 }),
 
-  /* 多库（桌面端的 projects）：切库只换当前目录，从不删文件 */
+  /* 多库：切库只换当前目录，从不删文件 */
   wikiProjects: () => call('/api/wiki/projects', { timeout: 20000 }),
   wikiSetProject: (dir: string) => call('/api/wiki/projects/set', { method: 'POST', body: { dir }, timeout: 30000 }),
   wikiAddProject: (dir: string, name?: string) =>
@@ -366,7 +372,7 @@ export const api = {
   wikiRenameSession: (id: string, title: string) =>
     call('/api/wiki/chat/rename', { method: 'POST', body: { id, title }, timeout: 20000 }),
   wikiDeleteSession: (id: string) => call('/api/wiki/chat/delete', { method: 'POST', body: { id }, timeout: 20000 }),
-  /** 库内技能（.llm-wiki/skills/*.md），问答时可勾选注入 */
+  /** 库内技能（.workstation-kb/skills/*.md），问答时可勾选注入 */
   wikiSkills: () => call('/api/wiki/chat/skills', { timeout: 20000 }),
 
   /* 入库队列 + 源目录监听 */
@@ -419,7 +425,7 @@ export const api = {
     call('/api/wiki/review/action', { method: 'POST', body: payload, timeout: 120000 }),
   wikiReviewIgnored: () => call('/api/wiki/review/ignored', { timeout: 20000 }),
 
-  /* 模型配置（预设 / 任务路由 / 连通测试；按已退役桌面端那套移植） */
+  /* 模型配置（预设 / 任务路由 / 连通测试） */
   wikiLlm: () => call('/api/wiki/llm', { timeout: 20000 }),
   wikiLlmPresets: () => call('/api/wiki/llm/presets', { timeout: 20000 }),
   /** patch：{ activePresetId?, taskRouting?, reasoning?, maxContextSize?, config?: {id, baseUrl, model, apiKey, apiMode, maxContextSize} } */
@@ -482,6 +488,9 @@ export const api = {
   memoDelete: (id: string) => call('/api/memo/delete', { method: 'POST', body: { id }, timeout: 20000 }),
   memoSummarize: (id: string, model = '') =>
     call('/api/memo/summarize', { method: 'POST', body: { id, model }, timeout: 300000 }),
+
+  // ↓ 新接口加在这里（与 server/index.mjs 里那条 route() 一一对应；
+  //   加完顺手看一眼 docs/EXTENDING.md §3.3 的三条约定：只在这里发请求、别裸 fetch、超时按任务时长给）
 }
 
 export type MemoSummaryEvent =
@@ -620,7 +629,7 @@ export async function wikiChatStream(
     skills?: string[]
     deep?: boolean
     topK?: number
-    /** 检索来源开关（对照桌面端 chat 的 tools）：库内永远开，网络 / 本机文件按需 */
+    /** 检索来源开关：库内永远开，网络 / 本机文件按需 */
     tools?: { web?: boolean; anytxt?: boolean }
     retrieval?: {
       webTopK?: number

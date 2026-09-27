@@ -1,8 +1,9 @@
 import { createApp } from 'vue'
 import type { Component } from 'vue'
 import { createPinia } from 'pinia'
+// ↓ 新图标加在这里（import 与 ICONS 两处）
 import {
-  AlarmClock, ArrowDown, ArrowLeft, ArrowRight, Bell, Box, Briefcase, Calendar, ChatDotRound,
+  Aim, AlarmClock, ArrowDown, ArrowLeft, ArrowRight, Bell, Box, Briefcase, Calendar, ChatDotRound,
   Checked, CircleCheck, CircleCheckFilled, CircleCloseFilled, Clock, Close, CloseBold, Cloudy, Coin, Compass, Connection, CopyDocument, DataBoard,
   DataLine,
   Delete, Document, Download, EditPen, Expand, Files, Finished, Flag, Fold, FolderOpened, Grid, Headset, Hide, Histogram, InfoFilled, Iphone, Key, Link,
@@ -25,9 +26,6 @@ import 'element-plus/es/components/message-box/style/css'
 import '@/styles/index.css'
 // 知识库模块的内部观感（卡片/表格/标签/指标卡），8 个界面共用一份
 import '@/styles/wiki.css'
-// KaTeX：知识库正文里的 $...$ 真 LaTeX 用（math-typeset.ts 调 renderToString），
-// 裸上下标那套（e^{x}、∫_0^∞）是自己排的、不吃这份 CSS
-import 'katex/dist/katex.min.css'
 
 import App from './App.vue'
 import { createAppRouter, takeResumePath } from './router'
@@ -53,11 +51,15 @@ app.use(createPinia())
  * 命名空间导入 + 动态取键（`Icons[name]`）会让打包器无法摇树，294 个图标会全部进包；
  * 只命名导入用到的这几十个，其余两百多个（约 80%）才能被裁掉。
  *
- * 维护：新增功能若图标不显示，多半是名字没在这里。把名字加进下面两个列表即可
- * —— 两处必须一致（import 与映射各一次）。
+ * 维护：新增功能若图标不显示（侧边栏 / 页面里那块空白），十有八九是名字没在这里。
+ * 加名字要改**两处**，就是下面这两个锚点标出来的地方 —— 它们必须一致
+ * （顶上 `import { … } from '@element-plus/icons-vue'` 一次，`ICONS` 映射一次）。
+ * 这是「加一个模块」里唯一漏了不会报错的步骤（模板按字符串解析图标，打包器看不出来），
+ * 所以两处都留了锚点注释，grep 「新图标加在这里」就能定位。
  */
+// ↓ 新图标加在这里（import 与 ICONS 两处）
 const ICONS: Record<string, Component> = {
-  AlarmClock, ArrowDown, ArrowLeft, ArrowRight, Bell, Box, Briefcase, Calendar, ChatDotRound,
+  Aim, AlarmClock, ArrowDown, ArrowLeft, ArrowRight, Bell, Box, Briefcase, Calendar, ChatDotRound,
   Checked, CircleCheck, CircleCheckFilled, CircleCloseFilled, Clock, Close, CloseBold, Cloudy, Coin, Compass, Connection, CopyDocument, DataBoard,
   DataLine,
   Delete, Document, Download, EditPen, Expand, Files, Finished, Flag, Fold, FolderOpened, Grid, Headset, Hide, Histogram, InfoFilled, Iphone, Key, Link,

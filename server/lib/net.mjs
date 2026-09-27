@@ -213,7 +213,7 @@ export function spawnHidden(command, { cwd } = {}) {
  *  状态影响 —— 这是「可见」二字的唯一保证，实测用 cmd 的 `start` 做不到稳定可见。
  *
  * 脚本落成 UTF-8 **带 BOM** 的 .ps1 再走 -File：命令行里直接传中文路径会被 cmd 的代码页
- * 糟蹋（与 campus.mjs 的 runElevated 同一个坑、同一个解法），落文件才稳。
+ * 糟蹋（与提权脚本同一个坑、同一个解法），落文件才稳。
  * 落点用系统 temp + 进程 PID 命名，同一进程复用，不删也无害。
  *
  * stdio 必须是 'ignore'（所以用 spawn 而不是 exec）：exec 强制 pipe，子进程会继承

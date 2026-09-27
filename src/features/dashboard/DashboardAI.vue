@@ -117,7 +117,7 @@ onMounted(init)
             <div class="welcome__title">问点什么</div>
             <p class="welcome__desc">
               它会看到你在看板上写的计划和记录、背单词的进度、今天上不上课（校历）、
-              以及模型花了多少钱。外部的数据源（课表 / 待办…）要自己接，见 docs/architecture.md。
+              以及模型花了多少钱。外部的数据源（课表 / 待办…）要自己接，见 docs/ARCHITECTURE.md。
             </p>
             <div class="welcome__chips">
               <button v-for="s in suggestions" :key="s" class="chip" @click="send(s)">{{ s }}</button>

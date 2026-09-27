@@ -5,12 +5,10 @@
  * 所以开机自启靠启动文件夹里的一个 VBS —— 这条 VBS 由这里生成与开关，
  * 面板里能看状态、能一键开关，不用再去翻启动文件夹。
  *
- * 关键：**VBS 里的 node 路径取 process.execPath**（就是当前跑边车的那个 node），
- * 不写死。历史上这里曾经照搬过另一份脚本生成的、写死某个工具目录下 node 绝对路径的版本 ——
- * 那个目录随那个工具升级就会变，是个定时炸弹。取 execPath 永远不会错。
+ * 关键：**VBS 里的 node 路径一律取 process.execPath**（就是当前跑边车的那个 node），
+ * 不写死 —— 发现它指向别的 node，体检里就提示重建那条自启项。
  *
  * 另一个坑见 autostart.mjs 顶部：VBS 必须 UTF-16LE + BOM，否则中文路径乱码。
- * 实测旧的那个 VBS 是 UTF-8 无 BOM，路径被解成乱码，**自启其实一直没生效**。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -20,7 +18,7 @@ import { isPortOpen, pidOnPort } from './net.mjs'
 
 /** 启动文件夹里那条自启项（.lnk）的文件名 —— 任务管理器「启动应用」显示的就是它 */
 function entryName() {
-  return loadConfig().workstation?.autostartEntry ?? '工作站管家.lnk'
+  return loadConfig().workstation?.autostartEntry ?? 'Workstation.lnk'
 }
 
 /** 自启脚本本体的文件名：与自启项同名，但放仓库 scripts/ 下、后缀 .vbs */
@@ -31,7 +29,7 @@ function scriptName() {
 /**
  * 自启脚本本体的绝对路径。
  *
- * 为什么不放启动文件夹：本机安全策略禁止在启动文件夹新建 .vbs / .cmd，只放行 .lnk
+ * 为什么不放启动文件夹：Windows 的安全策略禁止在启动文件夹新建 .vbs / .cmd，只放行 .lnk
  * （详见 autostart.writeShortcut 的注释）。所以启动文件夹放快捷方式，脚本本体在仓库里。
  */
 function scriptPath() {
@@ -51,9 +49,9 @@ function logPath() {
 /**
  * 解码成「wscript 实际会看到的文本」。
  *
- * wscript 的规则：有 UTF-16LE BOM 就按 UTF-16 读，否则按系统 ANSI（本机 936/GBK）读。
+ * wscript 的规则：有 UTF-16LE BOM 就按 UTF-16 读，否则按系统 ANSI（中文 Windows 常见 936/GBK）读。
  * 所以判断「这条 VBS 能不能用」必须按这个口径解码后再看路径，而不是看文件是不是 UTF-8
- * —— 实测启动文件夹里现存那条是 **GBK**，按 ANSI 解得对、能正常工作。
+ * —— 按 ANSI（GBK）存是能正常工作的。
  * （UTF-8 无 BOM 才是真坏的：会被当 GBK 解开、中文全乱，见 autostart.mjs 的编码表。）
  */
 function decodeAsWscript(buf) {
@@ -154,8 +152,8 @@ export function status() {
     const other = exes.find((p) => /node\.exe$/i.test(p))
     if (other) {
       warnings.push(
-        `用的是别的 node：${other}。当前这个（${expectedNode}）更稳；` +
-          `上面那个随那个工具升级可能消失，届时开机就起不来了`,
+        `用的是别的 node：${other}。建议重建这条自启项（当前这份边车用的是 ${expectedNode}）；` +
+          `别的 node 路径随它的安装方式变化可能消失，届时开机就起不来了`,
       )
     }
   }
@@ -186,7 +184,7 @@ export async function enable() {
     /* 日志目录建不出来不阻断自启 */
   }
   const content = autostart.buildSilentVbs({
-    title: '工作站管家 静默自启',
+    title: 'Workstation 静默自启',
     cwd: ROOT_DIR,
     command: `"${process.execPath}" "${entryScript()}"`,
     logFile: log,
@@ -199,7 +197,7 @@ export async function enable() {
     target: path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'wscript.exe'),
     args: `"${scriptPath()}"`,
     workdir: ROOT_DIR,
-    description: '工作站管家',
+    description: 'Workstation',
   })
   return { ...link, ...status() }
 }
@@ -214,7 +212,7 @@ export function remove() {
   return autostart.remove(entryName())
 }
 
-/** 边车自身状态（端口/PID）—— 和「服务与自启」页上其它卡片同一口径 */
+/** 边车自身状态（端口/PID）—— 和其它状态卡片同一口径 */
 export async function sidecarStatus() {
   const cfg = loadConfig()
   const port = Number(cfg.port || 5278)

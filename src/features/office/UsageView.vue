@@ -7,11 +7,10 @@
  * （间隔可用环境变量调），页面永远先画缓存，
  * 手动刷新才同步出网 —— 「卡一会才展示」就是这么治好的。
  *
- * 图形化对齐插件（配色仍走工作站令牌）：
+ * 图形与口径（配色走工作站令牌）：
  *  - 小时花费 = 实心柱（零值灰矮柱、每小时标签），数据来自官方聚合 /api/data/self；
- *  - 新增「缓存命中」卡：总命中率 + 命中最高的模型（cache_tokens / prompt_tokens）；
- *  - 失败是**真失败**：NewAPI type=5 失败日志 + 流式回包状态非 ok（插件同款口径），
- *    不再是旧版的「慢/重启发式」；「慢」= 耗时 ≥60s（与插件一致）。
+ *  - 「缓存命中」卡：总命中率 + 命中最高的模型（cache_tokens / prompt_tokens）；
+ *  - 本页的口径：慢 = 耗时 ≥60s；失败 = type=5 或流式回包状态非 ok。
  * 密钥明文永远在边车里，前端只拿到名字与数字。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
@@ -92,7 +91,7 @@ const failTotal = computed<number>(() => {
   if (live.value?.logs?.fail?.ok) return live.value.logs.fail.total
   return failLogs.value.length
 })
-const SLOW_SEC = 60 // 与插件一致的「慢」阈值
+const SLOW_SEC = 60 // 「慢」阈值：耗时 ≥60s
 const slowCount = computed(() => consumeLogs.value.filter((l) => (l.useTime || 0) >= SLOW_SEC).length)
 const avgPerCall = computed(() => {
   const t = todayTotal.value
@@ -124,7 +123,7 @@ const hourly = computed<{ h: number; yuan: number; count: number }[]>(() => {
 const hourMax = computed(() => Math.max(0.000001, ...hourly.value.map((b) => b.yuan)))
 const hourActive = computed(() => hourly.value.filter((b) => b.count > 0))
 const busiestHour = computed(() => hourActive.value.slice().sort((a, b) => b.yuan - a.yuan)[0] ?? null)
-/** 柱高：有花费按比例（最小 4px 留轮廓），零值给 2px 灰矮柱（插件同款观感） */
+/** 柱高：有花费按比例（最小 4px 留轮廓），零值给 2px 灰矮柱 */
 function barHeight(b: { yuan: number }) {
   return b.yuan > 0 ? Math.max(4, Math.round((b.yuan / hourMax.value) * 88)) : 2
 }
@@ -315,7 +314,7 @@ onUnmounted(() => {
       <div class="cols">
         <!-- ====================================================== 左列 -->
         <div class="col">
-          <!-- 小时花费（插件同款：实心柱 + 灰零柱 + 每小时标签） -->
+          <!-- 小时花费（实心柱 + 灰零柱 + 每小时标签） -->
           <div class="ws-card block">
             <div class="block__head">
               <span class="block__title"><el-icon><Histogram /></el-icon> 今日小时花费</span>
@@ -334,7 +333,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 密钥用量（插件同款：色块图标 + 今日/累计两个数字） -->
+          <!-- 密钥用量（色块图标 + 今日/累计两个数字） -->
           <div class="ws-card block">
             <div class="block__head">
               <span class="block__title"><el-icon><Key /></el-icon> 密钥用量</span>
@@ -373,7 +372,7 @@ onUnmounted(() => {
 
         <!-- ====================================================== 右列 -->
         <div class="col">
-          <!-- 缓存命中（插件同款：总命中率 + 命中最高的模型横条） -->
+          <!-- 缓存命中（总命中率 + 命中最高的模型横条） -->
           <div class="ws-card block">
             <div class="block__head">
               <span class="block__title"><el-icon><TrendCharts /></el-icon> 缓存命中</span>
@@ -450,8 +449,8 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="block__note">
-          「失败」是端点的真实失败日志（type=5，或流式回包状态非 ok）—— 口径与
-          newapi 插件一致；「慢」= 耗时 ≥{{ SLOW_SEC }}s。数据来自边车缓存，同步频率见页头。
+          「失败」是端点的真实失败日志（type=5，或流式回包状态非 ok）；
+          「慢」= 耗时 ≥{{ SLOW_SEC }}s。数据来自边车缓存，同步频率见页头。
         </div>
       </div>
     </template>
@@ -661,7 +660,7 @@ onUnmounted(() => {
 }
 
 /* ------------------------------------------------------------ 小时图 ---
-   插件同款：实心柱（零值灰矮柱），柱下每小时标签 */
+   实心柱（零值灰矮柱），柱下每小时标签 */
 .hours {
   display: flex;
   align-items: stretch;

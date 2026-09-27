@@ -1,8 +1,8 @@
 /**
  * 入库队列 + 源目录监听。
  *
- * 桌面端把「导入」拆成两件事，这里照搬：Source Watch（盯文件夹，发现新文件）与
- * Ingest Queue（排队解析 → 编译），区别是不再各存一份状态：
+ * 「导入」拆成两件事：源目录监听（盯文件夹，发现新文件）与
+ * 入库队列（排队解析 → 编译），两件事共用一份状态：
  *   · 队列      server/data/wiki-queue.json
  *   · 监听记录  server/data/wiki-watch.json（记 absPath + mtime，用于识别「新增或改过」）
  *
@@ -242,7 +242,7 @@ const DEFAULT_EXCLUDE_DIRS = ['.git', '.svn', '.hg', '.obsidian', '.idea', '.vsc
 function watchSettings() {
   const w = loadConfig().wiki ?? {}
   return {
-    /** 监听哪些目录；留空 = 只盯当前库的 raw/sources（桌面端的默认行为） */
+    /** 监听哪些目录；留空 = 只盯当前库的 raw/sources（默认行为） */
     dirs: Array.isArray(w.watchDirs) ? w.watchDirs : [],
     enabled: w.watchEnabled === true,
     autoIngest: w.watchAutoIngest === true,

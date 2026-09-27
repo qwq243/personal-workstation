@@ -60,6 +60,10 @@ const HOME = os.homedir()
 const homeSlash = HOME.replace(/\\/g, '/')
 
 export const DEFAULTS = {
+  // ↓ 新配置分节加在这里（只加 DEFAULTS 是不够的：还要挂进 server/lib/config-editable.mjs
+  //   的白名单、并在 server/config.example.json 里补一条说明。漏了 npm test 会点名，
+  //   流程见 docs/EXTENDING.md §3.4 与 docs/CONFIG.md §10）
+
   /** 边车监听端口 */
   port: 5278,
 
@@ -104,26 +108,30 @@ export const DEFAULTS = {
     model: '',
     /** 可选的模型清单（问答页 / 随记页的下拉用）；留空只显示 ai.model 一个 */
     models: [],
-    maxTokens: 1500,
     temperature: 0.6,
     /** 系统提示词里的「服务对象」那半句。默认中性，谁用谁改 */
     persona: '服务对象是一名在校大学生',
     /** 可选的补充身份信息（学校 / 专业…）：落 credentials.json，不进 config.json */
     personaPrivate: '',
+    // 这里**没有** maxTokens：输出预算由 lib/llm.mjs 按输入字数算（见该文件头部）。
+    // 曾经有过一个 1500 的默认值，思考模型会把正文吃成空串 —— 别再把它加回来。
   },
 
   /**
    * 工作站自身：开机自启走启动文件夹里的**快捷方式**（不需要管理员权限）。
    *
    * autostartEntry = 启动文件夹里那条自启项的文件名，也就是「任务管理器 → 启动应用」
-   * 里显示的名字。2026-09-23 从 `Workstation-Sidecar.vbs` 改成 `工作站管家.lnk`，原因有两个：
-   *   1) 名字要好看（用户要求）；
-   *   2) 本机安全策略**禁止在启动文件夹新建 .vbs / .cmd**，只放行 .txt 与 .lnk
+   * 里显示的名字。用 .lnk 而不是直接把 .vbs 放进去，原因：
+   *   1) 名字要能自己认出来；
+   *   2) Windows 的安全策略**禁止在启动文件夹新建 .vbs / .cmd**，只放行 .txt 与 .lnk
    *      （覆盖已存在的 .vbs 可以，所以老写法是「看着能用、一删就再也装不回去」）。
-   * 脚本本体因此落在仓库 `scripts/工作站管家.vbs`，启动文件夹只放一个指过去的 .lnk。
+   * 脚本本体**不进版本库**：它由 `server/lib/panel.mjs` 的 `enable()`（页面「运行与自启」点
+   * 「开启 / 重建」）或 `scripts/restart-sidecar.py` 在**运行时**生成到
+   * `scripts/Workstation.vbs`，启动文件夹里只放一条指过去的 .lnk。所以仓库里翻不到这个 .vbs
+   * 是正常的（`.gitignore` 也专门忽略它），别以为副本剪错了。
    */
   workstation: {
-    autostartEntry: '工作站管家.lnk',
+    autostartEntry: 'Workstation.lnk',
     /** 自启时的输出日志（追加） */
     autostartLog: 'logs/sidecar-autostart.log',
   },
@@ -164,11 +172,9 @@ export const DEFAULTS = {
   },
 
   /**
-   * 进程守护引擎（pguard）—— 工作台自带的那一套（规则照前身那套第三方工具的语义重写）。
+   * 进程守护引擎（pguard）—— 工作台自带的那一套，规则语义见 server/lib/pguard.mjs 头部。
    *
-   * 为什么自己养：它的规则引擎和它的界面在**同一个进程**里，没有无界面/服务模式；要做到
-   * 「面板在平台里、它也别再常驻（实测 122 MB）」，判定与动手就只能由边车来做。
-   * 规则是照着它的源码移植的，见 server/lib/pguard.mjs 头部。
+   * 判定与动手都在边车里做，不需要再常驻一个独立客户端；面板直接读引擎自己的状态与审计。
    *
    * 这里只放「开不开、数据放哪」；**规则阈值与名单不在这里** —— 那些在 dataDir 下的
    * config.json 里（面板的「参数」「名单」两页按白名单改，改完即时生效）。
@@ -264,9 +270,9 @@ export const DEFAULTS = {
   /**
    * 知识库（格式沿用一套通用的 markdown wiki 约定，见 server/lib/wiki.mjs）。
    *
-   * dir 指向的是**库本体**（不在本项目目录里）：wiki/ 存编译出的页面、raw/ 存不可变的原始资料。
-   * 换库只改这一个路径；库的格式是通用的那一套（schema.md + frontmatter + [[双链]]），Obsidian 也能直接打开，
-   * 桌面端想再打开同一份库照样能开 —— 移植只换了读写通道，没动格式。
+   * dir 指向的是**库本体**（不在本仓库里）：wiki/ 存编译出的页面、raw/ 存不可变的原始资料。
+   * 换库只改这一个路径；库的格式是通用的那一套（schema.md + frontmatter + [[双链]]），
+   * Obsidian 也能直接打开 —— 读写通道换过，格式没动。
    */
   wiki: {
     /**
@@ -282,8 +288,8 @@ export const DEFAULTS = {
     chatMaxTokens: 1600,
 
     /**
-     * 语义检索（嵌入端点）。与对话模型分开配 —— 桌面端也是这么分的。
-     * 默认指本机在用的那台 ollama（bge-m3，1024 维）；不可达时检索自动退回词法，不报错。
+     * 语义检索（嵌入端点）—— 与对话模型分开配。
+     * 留空 = 语义检索不可用，检索自动退回词法，不报错。
      */
     embedding: {
       enabled: false,
@@ -298,7 +304,7 @@ export const DEFAULTS = {
     },
 
     /**
-     * 模型配置（对照已退役桌面端那套「预设 → 解析」两层）：
+     * 模型配置（「预设 → 解析」两层）：
      * 预设（厂商/端点/模型/上下文）→ 每预设一份配置 → 任务路由（对话与编译可各点一个预设）。
      * 内置预设见 wiki-llm.mjs 的 PRESETS；`workstation` = 跟随工作台 ai.*（出厂即可用）。
      * apiKey 走 credentials.json（SECRET_PATHS 的 ['wiki','llm','keys']）。
@@ -317,7 +323,7 @@ export const DEFAULTS = {
     },
 
     /**
-     * 检索（对照已退役桌面端那套：网络搜索 + 本机 AnyTXT）：
+     * 检索（网络搜索 + 本机 AnyTXT）：
      * provider 是网络搜索（无 key 也能用 firecrawl/searxng）；anyTxt 是本机文件全文检索（要装 AnyTXT）。
      * defaultSource 决定问答默认检索哪儿：wiki / web / anytxt / all。
      * apiKey 走 credentials.json（['wiki','search','apiKey']）。
@@ -343,7 +349,7 @@ export const DEFAULTS = {
     scheduledImport: { enabled: false, intervalMin: 60 },
 
     /**
-     * 云端文档解析（MinerU）—— 桌面端用的同一个服务，这里当**首选通道**。
+     * 云端文档解析（MinerU）—— 本项目的**首选通道**。
      *
      * 为什么默认开：本地 pdf 通道只有文本层（表格塌成碎字、图片拿不到），扫描版更是完全没辙；
      * 云端开着 OCR 能把这两件事一起解决。失败或关掉时自动回落本地通道（pandoc/LibreOffice/Python）。
@@ -366,7 +372,7 @@ export const DEFAULTS = {
     },
 
     /**
-     * 源目录监听（桌面端的 Source Watch）：盯几个文件夹，发现「新增或改过」的
+     * 源目录监听：盯几个文件夹，发现「新增或改过」的
      * pdf/docx/xlsx/pptx/md/txt/html/csv 就排队入库。
      * dirs 留空 = 只盯当前库的 raw/sources。
      * autoIngest 默认关：一旦开了，边车会在后台自己花模型额度去编译，得由用户主动打开。

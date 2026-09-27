@@ -15,11 +15,15 @@ import { calendarModule } from './office/calendar.module'
 import { usageModule } from './office/usage.module'
 import { vocabModule } from './vocab/module'
 import { guardModule } from './guard/module'
+import { serviceModule } from './service/module'
 import { wikiModule } from './wiki/module'
 import { memoModule } from './memo/module'
+// ↓ 新模块 import 加在这里（三步法的第 1 步；图标别忘了 src/main.ts 的两处锚点）
 
 export function registerAllModules(): void {
-  // 办公组（order 5）：每日看板 → 日历日程 → 模型用量 → 规划台
+  // 侧边栏顺序由两层决定：大模块分组的 order（见 core/types.ts 的 MODULE_GROUPS），
+  // 组内按各模块的 order 升序。这里只列「注册」，排序在 registry.ts 里做。
+  // 置顶区（没有 category 的）：进程守护 → 运行与自启。
   registerModule(dashboardModule)
   registerModule(calendarModule)
   registerModule(usageModule)
@@ -28,5 +32,6 @@ export function registerAllModules(): void {
   registerModule(wikiModule)
   registerModule(memoModule)
   registerModule(guardModule)
-  // ↓ 下一个功能加在这里
+  registerModule(serviceModule)
+  // ↓ 下一个功能加在这里（新图标别忘了 src/main.ts 的白名单，两处）
 }

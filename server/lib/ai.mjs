@@ -4,7 +4,8 @@
  * 全部经边车代理一个 OpenAI 兼容端点（浏览器完全不碰密钥），端点与密钥在设置页里配。
  * 提示词把「已知事实」结构化喂进去，减少模型编造；输出要求短、可执行。
  */
-import { chat, balance, todaySpendByToken } from './newapi.mjs'
+import { balance, todaySpendByToken } from './newapi.mjs'
+import { chatGuarded } from './llm.mjs'
 import { getDay, recentDays, streak, todayStr } from './dashboard.mjs'
 import { loadConfig } from '../config.mjs'
 import * as schoolCalendar from './school-calendar.mjs'
@@ -98,8 +99,8 @@ function ctxToText(ctx) {
 /**
  * 系统提示词里的「服务对象」这段。
  *
- * 本来这里写死了一句身份（学校 + 学号 + 专业）—— 那是作者本机的用法，
- * 开源版抽成配置项：`config.json` 的 `ai.persona`，谁用谁改；
+ * 这里原来写死过一句具体身份，开源版抽成两个配置项：
+ * `config.json` 的 `ai.persona`，谁用谁改；
  * 想再具体一点，把身份信息写进 `server/credentials.json` 的 `ai.personaPrivate`（本机文件，不进版本库）。
  */
 function personaLine() {
@@ -115,6 +116,9 @@ const SYSTEM_BASE = () =>
   '只依据「已知事实」作答；事实里没有的信息不要编，需要的话明确说「这个我不知道」。' +
   '给建议要具体可执行，避免「保持专注」这类空话。'
 
+/** 提示词字符数：统一层按它算输出预算（预算不再由 config.ai.maxTokens 拍板） */
+const charsOf = (messages) => messages.reduce((n, m) => n + String(m.content ?? '').length, 0)
+
 /** 每日总结 + 今日建议（看板主卡片） */
 export async function dailySummary({ date, force = false } = {}) {
   const ctx = await gatherContext(date)
@@ -125,10 +129,12 @@ export async function dailySummary({ date, force = false } = {}) {
     `【今日要点】\n3-5 条，每条一行，先说事实（几节课/哪个任务/花了多少钱/状态如何），再给一句判断。\n\n` +
     `【建议】\n2-4 条，每条一行，具体到「现在做什么」。如果看到卡点或连续多天没动的待办，优先提醒并给出最小下一步。`
 
-  const r = await chat([
+  const messages = [
     { role: 'system', content: SYSTEM_BASE() },
     { role: 'user', content: prompt },
-  ])
+  ]
+  // 走统一层：预算按输入字数算，正文被思考挤空时会自动加倍重试（原来吃 ai.maxTokens）
+  const r = await chatGuarded(messages, { tier: 'normal', chars: charsOf(messages), label: 'ai.summary' })
   if (!r.ok) return { ok: false, date: ctx.date, error: r.error, detail: r.detail, context: ctx }
   return {
     ok: true,
@@ -147,7 +153,7 @@ export async function dailySummary({ date, force = false } = {}) {
 /**
  * 今日行动建议：由「昨天的总结 + 今天的课表/待办/临近截止」推 3 条现在就能做的动作。
  *
- * 和 dailySummary 的分工（2026-09-14 与用户对齐）：
+ * 和 dailySummary 的分工：
  *   dailySummary → 回顾「那天发生了什么」，第二天早上当昨天看；
  *   todayBrief   → 推荐今天怎么过，**综合口径**：课表空档 + 未完成待办 + 最近截止 + 备考阶段。
  *
@@ -204,10 +210,12 @@ export async function todayBrief({ date, recap } = {}) {
     `最后一行：**风险**：…（连续多天没动的计划、临近的截止）；实在没有就写「无」。\n` +
     `不要别的标题、不要代码块、总长不超过 200 字。事实里没有的不要编。`
 
-  const r = await chat([
+  const messages = [
     { role: 'system', content: SYSTEM_BASE() },
     { role: 'user', content: prompt },
-  ])
+  ]
+  // 走统一层：原来吃 ai.maxTokens（1500）常被思考挤空，现在按输入字数算预算
+  const r = await chatGuarded(messages, { tier: 'normal', chars: charsOf(messages), label: 'ai.today' })
   if (!r.ok) return { ok: false, date: d, error: r.error, detail: r.detail }
   return { ok: true, date: d, content: r.content, model: r.model, provider: r.provider, usage: r.usage, generatedAt: Date.now() }
 }
@@ -223,7 +231,9 @@ export async function reviewDraft({ date } = {}) {
     `2) 指出哪件真正推进了、哪件只是原地打转；\n` +
     `3) 最后给 2-3 条明天的具体安排。\n` +
     `总长控制在 400 字内，用通顺的中文段落，不要 markdown。`
-  const r = await chat([{ role: 'system', content: SYSTEM_BASE() }, { role: 'user', content: prompt }])
+  const messages = [{ role: 'system', content: SYSTEM_BASE() }, { role: 'user', content: prompt }]
+  // 走统一层：400 字复盘任务也给守卫，正文空串时自动加倍预算重试
+  const r = await chatGuarded(messages, { tier: 'normal', chars: charsOf(messages), label: 'ai.review' })
   if (!r.ok) return { ok: false, error: r.error, detail: r.detail }
   return { ok: true, content: r.content, model: r.model, generatedAt: Date.now() }
 }
@@ -237,7 +247,8 @@ export async function ask(question, { date, history = [] } = {}) {
     ...history.slice(-8).map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: question },
   ]
-  const r = await chat(messages)
+  // 走统一层：system 里塞了整份今日事实，预算按它的字数算，问答不再被思考挤空
+  const r = await chatGuarded(messages, { tier: 'normal', chars: charsOf(messages), label: 'ai.ask' })
   if (!r.ok) return { ok: false, error: r.error, detail: r.detail }
   return { ok: true, content: r.content, model: r.model, usage: r.usage }
 }

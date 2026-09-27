@@ -1,0 +1,63 @@
+name: CI
+
+# 每次往 main 推、以及每个 PR 都跑：装依赖 → 类型检查 → 纯逻辑测试 → 对拍 → 构建。
+#
+# 为什么是两个平台（matrix）：
+#   · 页面与纯逻辑这几步是**真的跨平台**（README「环境要求」那张表把它们和「只在 Windows 可用」
+#     的那一半分开了），CI 正好替这句话作证；
+#   · 进程 / 端口 / 自启 / 文档解析那几块依赖 Windows 自带命令，**本 workflow 故意不碰**
+#     —— 它们要真机，见下面「刻意不跑什么」。
+jobs:
+  check:
+    name: typecheck / test / build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      # 一个平台红了不要让另一个平台的结果藏着 —— 两个都要看到
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 与 package.json 的 `engines: >=22.6` 对齐：
+          # `npm run test:parity` 用了 `--experimental-strip-types`，Node 22.6 才有。
+          # 写 '22' 会拿到 22.x 的最新一版（不是 22.0），所以不用担心卡在 22.5。
+          node-version: '22'
+          cache: npm
+
+      # 用 `npm ci` 而不是 `npm install`：按 package-lock.json 精确还原，CI 才可复现
+      - run: npm ci
+
+      # 更严的类型检查（vue-tsc 带 .vue 模板）；package.json 里这条就是 `vue-tsc --noEmit`
+      - run: npm run typecheck
+
+      # 纯逻辑回归：校历 / 抓取纯函数 / 单实例闸 / 配置白名单对账 / 注册表契约
+      # （等于 `node --test "scripts/tests/*.test.mjs"`；走 npm script 是为了让 package.json
+      #   当唯一事实源 —— 以后换文件名 CI 自动跟上）
+      - run: npm test
+
+      # 前后端两套词条解析器对拍：改过任一解析器就必须过这一关
+      - run: node --experimental-strip-types scripts/parser-parity.mjs
+
+      - run: npm run build
+
+# ---------------------------------------------------------------------------
+# 刻意**不**在这里跑什么（别好心加回来）
+#
+#   · `npm run test:pguard`（= `node scripts/pguard-smoke.mjs --no-start`）
+#     它要 `powershell.exe` 采样**这台机器真实的进程表**：本机跑得通（退出码 0），
+#     但在 ubuntu 上必然失败；即使在 windows 上，它检查的是「这一拍选了谁」，
+#     结果随 runner 上跑着什么而变化 —— 不是一个稳定的门禁。
+#     要验它请在真机上手工跑，见 docs/verifying.md §3。
+#
+#   · `npm run server` / `npm run dev:all`
+#     会**常驻**（还带起进程守护引擎与用量缓存定时器），CI 里跑它只会一直挂到超时。
+#     要验「边车能起来」就在真机上双击 `启动工作站.cmd` 看启动日志，见 docs/verifying.md §2。
+#
+#   · 任何 linter / formatter
+#     仓库刻意不引 lint 工具链（会往 devDependencies 里塞东西、破坏「边车零第三方依赖 +
+#     前端只有 6 个包」这个卖点）。`npm run typecheck` 已经是这里最严的一道。
+# ---------------------------------------------------------------------------

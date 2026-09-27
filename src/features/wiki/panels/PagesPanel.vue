@@ -14,7 +14,7 @@ const route = useRoute()
 const router = useRouter()
 
 const keyword = ref('')
-/** 左栏宽度：可拖拽（对照桌面端的 ResizablePanel），存 localStorage，双击分隔条复位 */
+/** 左栏宽度：可拖拽，存 localStorage，双击分隔条复位 */
 const sideW = ref(Number(localStorage.getItem('workstation.wiki.sideW')) || 280)
 const resizing = ref(false)
 function startResize(e: MouseEvent) {
@@ -38,7 +38,7 @@ function resetSide() {
   sideW.value = 280
   localStorage.setItem('workstation.wiki.sideW', '280')
 }
-/** 右侧元信息栏（frontmatter / 反链 / 出链）：对照桌面端的 preview-panel。
+/** 右侧元信息栏（frontmatter / 反链 / 出链）。
  *  默认**收起** —— 它一开就吃掉 250px，正文会被挤窄（这正是「宽度异常」的成因）。 */
 const showMeta = ref(localStorage.getItem('workstation.wiki.meta') === '1')
 function toggleMeta() {
@@ -196,7 +196,7 @@ watch(() => [route.query.type, route.query.path, route.query.slug], applyQuery)
       </details>
     </aside>
 
-    <!-- 拖拽条：左右拖改宽度，双击复位（像桌面端的 ResizablePanel） -->
+    <!-- 拖拽条：左右拖改宽度，双击复位 -->
     <div class="pg__grip" :class="{ 'is-drag': resizing }" title="拖动改宽度，双击复位" @mousedown.prevent="startResize" @dblclick="resetSide" />
 
     <section class="wk-card">
@@ -236,7 +236,7 @@ watch(() => [route.query.type, route.query.path, route.query.slug], applyQuery)
       </template>
     </section>
 
-    <!-- 右侧元信息栏：frontmatter / 统计 / 反链 / 出链（对照桌面端的 preview-panel） -->
+    <!-- 右侧元信息栏：frontmatter / 统计 / 反链 / 出链 -->
     <aside v-if="showMeta && current" class="wk-card pg__meta">
       <div class="wk-card__head">
         <h3 class="wk-card__title"><el-icon><InfoFilled /></el-icon> 页面信息</h3>
@@ -277,7 +277,7 @@ watch(() => [route.query.type, route.query.path, route.query.slug], applyQuery)
 
 <style scoped>
 /* 布局：左栏（可拖）｜拖拽条｜正文（铺满）｜右元信息栏。
-   正文不再限宽 —— 桌面端的阅读器是 max-w-none，限宽会在宽屏上留一条空带。 */
+   正文不再限宽 —— 限宽会在宽屏上留一条空带。 */
 .pg__layout {
   display: grid;
   gap: 12px;
@@ -384,7 +384,7 @@ watch(() => [route.query.type, route.query.path, route.query.slug], applyQuery)
   font-size: var(--ws-fs-xs);
   line-height: 1.75;
 }
-/* 正文铺满卡片（与桌面端一致）；行宽靠字号与行高控制，不加 max-width */
+/* 正文铺满卡片；行宽靠字号与行高控制，不加 max-width */
 .pg__reader {
   min-width: 0;
 }

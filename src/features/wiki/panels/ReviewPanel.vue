@@ -84,7 +84,7 @@ onMounted(load)
     </div>
 
     <p class="wk-hint">
-      只报不改的事一件不做：每项都带动作；「建骨架」只建空白页不猜内容，库也**不提供删除**（忽略只是不再显示）。
+      只报不改的事一件不做：每项都带动作；「建骨架」只建空白页不猜内容，库也<b>不提供删除</b>（忽略只是不再显示）。
     </p>
 
     <section v-for="[kind, list] in grouped" :key="kind" class="wk-card wk-card--flush">

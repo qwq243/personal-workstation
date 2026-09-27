@@ -12,8 +12,8 @@
 
 ### 这份盘点怎么来的（先看，否则会找错文件）
 
-原盘点是在**开源前那份完整副本**上做的，里面有几条指向的模块（看板纸片、教务、签到、校园网、夸克网盘、
-第三方进程守护接入层）**在开源版里已经整块删除**。那些问题随之消失，代码也不用改。所以下面每条都标了状态：
+原盘点是在开源前做的，里面有几条指向的**私有模块**（随开源删掉的那几个）
+**在开源版里已经整块删除**。那些问题随之消失，代码也不用改。所以下面每条都标了状态：
 
 | 状态 | 含义 |
 |---|---|
@@ -31,7 +31,7 @@
 **本次没跑的**（避免误导）：
 
 - **没跑 `npm run build`** —— 它会覆盖现有 `dist/`，本次只读；
-- **没起边车** —— 5278 端口被本机真实工作站占着，起第二个会互相干扰，也会写出 `config.json`。
+- **没起边车** —— 本机已有实例占用该端口，起第二个会互相干扰，也会写出 `config.json`。
   所以凡是要「起服务打 HTTP」才能量的（`Content-Encoding` 响应头、`/api/wiki/*` 冷读延迟），本文标注为**未实测**，
   只给代码依据。
 
@@ -42,15 +42,15 @@
 | 优先级 | 问题 | 位置 | 现状 | 影响 |
 |---|---|---|---|---|
 | **P0** | 进程守护页「进程」标签一次 5 秒 | `src/features/guard/GuardView.vue:135-141,151-153` → `server/index.mjs:686` → `server/lib/pguard.mjs:1364` | 🔴 实测 **5,039 / 4,683 ms** | 点开那个标签要干等 5 秒，且串起 **6 次** PowerShell 子进程 |
-| **P1** | 主 CSS 有 42 KB 只有模块页用得上，却是渲染阻塞 | `src/main.ts:27,30` | 🔴 主 CSS 102,731 B，其中 KaTeX 26,252 B + `wiki.css` ≈15.8 KB | 每次首屏都为「知识库正文排版」付下载与解析成本 |
+| **P1** | 主 CSS 里有 26 KB 只有知识库用得上，却是渲染阻塞 | 原 `src/main.ts:30`，现 `src/features/wiki/WikiMarkdown.vue:8` | 🟢 **已修**：KaTeX 移出主 CSS（102,731 B → 73,444 B）；`wiki.css` ≈15.8 KB 仍在主 CSS | 首屏不再为「知识库正文排版」付 KaTeX 的下载与解析成本 |
 | **P1** | KaTeX 字体 59 个共 1.07 MB 进包（项目自己只打算带 5 个） | `katex/dist/katex.min.css` 连带 | 🔴 59 个文件 / 1,072,948 B，占 `dist` 总体积 **38.4%** | 装进静态目录 1 MB 垃圾；真用到时也是白等 |
 | **P1** | 边车不压缩、只走 HTTP/1.1，首屏 315 KB JS 原样下发 | `server/index.mjs:1135-1181`、`server/index.mjs:1196` | 🔴 代码里**零** `Content-Encoding` / gzip / brotli；`dist` 里 **0** 个 `.gz`/`.br` | 局域网无所谓，远程/隧道访问时体积就是时间 |
 | **P2** | `chunkSizeWarningLimit: 1600` 把体积告警压住了 | `vite.config.ts:57` | 🔴 仍是 1600，315 KB 的 entry 不报警 | 体积劣化不会被构建发现 |
 | **P2** | 两个 `tasklist` 封装成了死代码 | `server/lib/net.mjs:50-73` | 🟡 全仓 **0 个调用点**（含 `src/`） | 留着像「能用的工具」，谁接上去就继承 441 ms/次 的税 |
-| ⚪ | 看板冷读 1.33–1.64 s | `papertodo.mjs`（已删） | ⚪ 模块已删 | 不需要改 |
+| ⚪ | 看板冷读 1.33–1.64 s | 随开源删掉的桌面程序模块 | ⚪ 模块已删 | 不需要改 |
 | ⚪ | `/api/pguard/status` 约 500 ms × 每 12 s | 第三方进程守护接入层（已删） | ⚪ 路由现在走自研引擎，实测 **4 ms** | 已消失 |
-| ⚪ | `/api/campus/status` 2.19 s 只缓存 3 s | `campus.mjs`（已删） | ⚪ 模块已删 | 不需要改 |
-| ⚪ | 常驻出网轮询（签到 60 s / 校园网 25 s / 夸克 1.2 s） | 三个模块均已删 | ⚪ | 不需要改 |
+| ⚪ | 校方接口状态 2.19 s 只缓存 3 s | 随开源删掉的校方接口模块 | ⚪ 模块已删 | 不需要改 |
+| ⚪ | 常驻出网轮询（三个模块，最快 1.2 s 一轮） | 三个模块均已删 | ⚪ | 不需要改 |
 | ✅ | 路由懒加载、无重复依赖、静态服务流式、模块加载 46 ms | 见文末「已核对不是问题」 | ✅ 本次复核仍然成立 | — |
 
 ---
@@ -136,20 +136,30 @@ const r = await runHidden(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Fi
 
 ## P1 —— 首屏体积
 
-### P1-1 主 CSS 里 42 KB 只有模块页用得上，而且是渲染阻塞
+### P1-1 主 CSS 里 42 KB 只有模块页用得上，而且是渲染阻塞 —— KaTeX 那半已修
 
-**位置**：`src/main.ts:25,27,30`
+**位置**：`src/main.ts:26`（`wiki.css`，仍在主 CSS）与 `src/features/wiki/WikiMarkdown.vue:8`（KaTeX，已移入）
+
+**已修部分**：`import 'katex/dist/katex.min.css'` 从全局入口移进知识库渲染器，Vite 把它打进
+`WikiMarkdown-*.css` 懒加载 chunk。
+
+```
+修复前  主 CSS  index-Ddag27zR.css   102,731 B   `.katex` 出现在第 76,479 B
+修复后  主 CSS  index-CBkcbkgL.css    73,444 B   `.katex` 找不到（-1）
+        WikiMarkdown-jBk7nW5x.css    33,725 B   `.katex` 出现在第 10,550 B
+```
+
+**未修部分**：`@/styles/wiki.css`（≈10 KB 源 / 主 CSS 里约 15.8 KB）仍引在 `src/main.ts`。
 
 ```ts
 import '@/styles/index.css'      // :25  真正全局的
-import '@/styles/wiki.css'       // :27  知识库 8 个界面共用 —— 但首屏不需要
-import 'katex/dist/katex.min.css'// :30  知识库正文的 LaTeX —— 但首屏不需要
+import '@/styles/wiki.css'       // :26  知识库 8 个界面共用 —— 但首屏不需要
 ```
 
 **现象**：`index.html` 用普通 `<link rel="stylesheet">` 引这份 CSS（没有 `media` 之类的可选属性），
 浏览器必须下完解析完才首屏渲染。
 
-**依据（对已构建 dist 逐字节定位，本次实测）**
+**依据（修复前对当时 dist 逐字节定位）**
 
 ```
 主 CSS  index-Ddag27zR.css   102,731 B
@@ -236,7 +246,7 @@ entry  index-CW9fDOkg.js        315,047 B / 1 个文件（无任何静态 import
 
 **位置**：`server/lib/net.mjs:50-58`（`isProcessRunning`）、`:60-73`（`pidsOf`）
 
-**现象**：全仓**没有任何调用点**。原来用它们的两个模块（看板纸片、第三方进程守护接入层）已随开源删除。
+**现象**：全仓**没有任何调用点**。原来用它们的两个模块（桌面程序模块与第三方进程守护接入层）已随开源删除。
 
 **依据（本次实测）**
 
@@ -279,10 +289,10 @@ build: {
 
 | 原问题 | 原数字 | 现状 |
 |---|---|---|
-| 看板冷读 `/api/papertodo/notes` 慢 | 1.452 / 1.636 / 1.333 / 1.397 s，同一次冷读里 `isAppRunning()` 被调了两遍 | `server/lib/papertodo.mjs` 已删（依赖校方接口 + 本机 PaperTodo 桌面程序 + 微信 openId） |
+| 看板冷读某个桌面程序模块的接口慢 | 1.452 / 1.636 / 1.333 / 1.397 s，同一次冷读里 `isAppRunning()` 被调了两遍 | 那个模块已随开源删除（依赖校方接口 + 本机桌面程序 + 微信签到） |
 | `/api/pguard/status` 每 12 s 一次 500 ms | 0.532 / 0.515 / 0.476 s，body 32,142 B | 那个 500 ms 来自**第三方接入层**的 `pidsOf(EXE_NAME)`（第三方进程守护模块，已删）。现在 `server/index.mjs:665` 走自研 `pguard.status()` —— **本次实测 4 ms / 4,917 B**。前端的 12 s 轮询（`GuardView.vue:342`）只打这个接口，`loadProcs()` 只在切标签时调一次（`:168`） |
-| `/api/campus/status` 2.19 s 却只缓存 3 s | 首次 2.186850 s；`campus.mjs:89` 的 TTL 是 3000 ms；`index.mjs:214` 用 `force:true` 绕过 | `server/lib/campus.mjs` 已删。`/api/overview` 的 **SWR + 磁盘缓存仍在**（`server/index.mjs:215-237`，`OVERVIEW_TTL = 20000`），但 `buildOverview()` 现在只取本机数据与模型端点，不再强制外呼校方服务 |
-| 常驻出网轮询 | 签到每 60 s 打无缓存外部接口；校园网每 25 s 串行探最多 3 个 URL（单次 4 s 超时、失败再重试，最坏 24 s） | 签到与校园网两个模块都已删，随模块消失 |
+| 校方接口状态 2.19 s 却只缓存 3 s | 首次 2.186850 s；那个模块的 TTL 是 3000 ms；`index.mjs:214` 用 `force:true` 绕过 | 那个模块已随开源删除。`/api/overview` 的 **SWR + 磁盘缓存仍在**（`server/index.mjs:215-237`，`OVERVIEW_TTL = 20000`），但 `buildOverview()` 现在只取本机数据与模型端点，不再强制外呼校方服务 |
+| 常驻出网轮询 | 两个模块分别每 60 s / 25 s 打外部接口（后者单次 4 s 超时、失败再重试，最坏 24 s） | 两个模块都已删，随模块消失 |
 | `tasklist` 税被两处模块反复付 | 单次 466 ms，6 个调用点 | 调用点已删；只剩死代码（见 P2-1） |
 
 ---
@@ -294,7 +304,7 @@ build: {
 - **路由全部懒加载**。`src/features/*/module.ts` 里 16 处 `component: () => import(...)`；
   `src/features/wiki/module.ts:16` 的 `const WORKSPACE = () => import('./WikiWorkspace.vue')`，
   `:30-39` 六条路由共用它 —— 也是箭头函数，一样懒。**0 个静态组件引用**。
-- **没有重复依赖**。删掉夸克模块后 hls.js / art-video-player 已**整体离开仓库**
+- **没有重复依赖**。随开源删掉云盘模块后，hls.js / art-video-player 已**整体离开仓库**
   （`ls dist/assets | grep -iE "hls|art-video"` 无结果）；KaTeX 只出现在
   `WikiMarkdown-UGEDScev.js` / `WikiMarkdown-Bafn6KIf.css` 这一对里。
 - **静态服务是流式的**。`server/index.mjs:1180`：`fs.createReadStream(file).pipe(res)` ——
@@ -323,10 +333,10 @@ build: {
    它只是为了两次快照之间有足够时间差算 CPU 增量 —— 改成「距上次快照不足 700 ms 才补等差额」，
    在已经有过 tick 快照的场景下可以省掉整段。**改前必须确认 CPU 增量语义不变**（这条风险最高，放最后做）。
    → 这三条合起来目标：`/api/pguard/processes` 从 5.0 s 进到 **2 s 内**。
-4. **把 `import 'katex/dist/katex.min.css'` 从 `src/main.ts:30` 挪进 `src/features/wiki/WikiMarkdown.vue`**
-   —— 主 CSS 立刻少 26,252 B，而且和它已经懒加载的 JS 待在一起。
-5. **把 `import '@/styles/wiki.css'` 从 `src/main.ts:27` 挪给知识库的入口组件**
-   —— 再少约 15.8 KB。这两条一起做，主 CSS 从 102,731 B 降到约 60 KB。
+4. ~~**把 `import 'katex/dist/katex.min.css'` 从 `src/main.ts:30` 挪进 `src/features/wiki/WikiMarkdown.vue`**~~
+   —— **已做**（见 P1-1）：主 CSS 少 29,287 B（102,731 B → 73,444 B），和它已经懒加载的 JS 待在一起。
+5. **把 `import '@/styles/wiki.css'` 从 `src/main.ts:26` 挪给知识库的入口组件**
+   —— 再少约 15.8 KB。这条做完，主 CSS 从 73,444 B 降到约 58 KB。
 6. **KaTeX 只留一套字体**：删掉 20 个 `.ttf` + 20 个 `.woff`（`dist` 少 816,780 B），
    或在 `vite.config.ts` 里把字体解析指向 `src/assets/katex-fonts/` 那 5 个 woff2。
    —— 注意 `WikiMarkdown.vue` 里已自写了 5 条 `@font-face`，先确认两套声明不冲突再删。
@@ -398,7 +408,7 @@ npm run test:pguard     # 只读 + 演练模式，不改配置、不动手
 
 | 踩过的 | 代价 |
 |---|---|
-| `tasklist` 判进程是否在跑，放在每次读纸片的路径上 | 466 ms × 每次请求 |
+| `tasklist` 判进程是否在跑，放在每次读模块数据的路径上 | 466 ms × 每次请求 |
 | `tasklist` 判进程是否在跑，被同一个冷读调了两遍 | 930 ms |
 | `Add-Type` 现场编译 C# 问「前台窗口是谁」 | 约 500 ms |
 | `Get-CimInstance Win32_Process` 查父子关系 | 463 ms |

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * 设置 · 模型（按已退役桌面端那套「预设 → 解析」移植）。
+ * 设置 · 模型（「预设 → 解析」）。
  *
- * 三层结构照搬桌面端：
+ * 三层结构：
  *   预设下拉（厂商/端点/上下文建议）→ 每预设一份配置（端点、模型、key、线协议、上下文、思考模式）
  *   → 任务路由（对话 / 编译 可各点一个预设）。
  * 差异只有一处：多一个「跟随工作台」预设，出厂就能用，不必先配 key。
@@ -53,7 +53,7 @@ function onPick(id: string) {
   syncForm()
 }
 
-/** 换预设 = 同时把「当前用哪个」记下来（与桌面端一致：选中即生效） */
+/** 换预设 = 同时把「当前用哪个」记下来（选中即生效） */
 async function activate() {
   busy.value = 'active'
   const r = await api.wikiLlmSave({ activePresetId: picked.value })
@@ -216,7 +216,7 @@ onMounted(load)
     <section class="wk-card">
       <h3 class="wk-card__title" style="margin-bottom: 8px">任务路由</h3>
       <p class="wk-card__desc">
-        对话与编译可以用不同的预设（对照桌面端的 taskModelRouting）：例如编译用便宜的、问答用强的。
+        对话与编译可以用不同的预设：例如编译用便宜的、问答用强的。
         留空 = 跟着上面的「当前预设」。
       </p>
       <div class="st__row">

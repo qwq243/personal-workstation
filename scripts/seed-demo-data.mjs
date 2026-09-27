@@ -166,7 +166,7 @@ if (RESET) {
           deadline: '',
           progress: 0,
           stage: '想清楚要接什么',
-          note: '看板只是容器：后端往 /api/overview 加一节，前端加一张卡。见 docs/architecture.md。',
+          note: '看板只是容器：后端往 /api/overview 加一节，前端加一张卡。见 docs/ARCHITECTURE.md。',
           source: 'scripts/seed-demo-data.mjs',
           next: [
             { id: 's1', text: '列一下自己每天真正会看的数据', done: false },

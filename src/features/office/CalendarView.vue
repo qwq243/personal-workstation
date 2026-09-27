@@ -135,9 +135,9 @@ const hueMap = computed<Record<string, number>>(() => {
   for (const list of Object.values(coursesByDow.value)) {
     for (const c of list) if (c?.name) names.add(String(c.name))
   }
-  // 为什么不用名字哈希：本学期的 8 门课哈希到 6 个桶里，实测 4 门挤进同一桶，
+  // 为什么不用名字哈希：一个学期的课表通常 6~10 门，哈希到 6 个桶里必然撞色，
   // 满屏一片玫红，一眼分不出来。改成「按课程名排序后轮流取 8 组色阶」——
-  // ≤8 门课保证两两不同色（一个学期的课表通常就 6~10 门）。
+  // 课程数不超过色阶组数时保证两两不同色。
   //
   // 取色顺序刻意打乱（不是 1,2,3,…）：相邻两节课在名单里往往也相邻，
   // 按顺序走会给它们青/绿这种近色；按下面这个顺序，相邻两门必定对比明显。
@@ -276,7 +276,7 @@ const weekDates = computed(() => {
 
 /* ------------------------------------------------------------- 教学周 --- */
 
-/** 锚点那天的教学周。以校历现算为准（课表快照里的 week 会 stale，只作兜底）。 */
+/** 锚点那天的教学周。以校历现算为准（课程快照里的 week 会 stale，只作兜底）。 */
 const teachingWeek = computed<number | null>(() => {
   const fromSchool = markOf(anchor.value).week
   if (fromSchool) return fromSchool

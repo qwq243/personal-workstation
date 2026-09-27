@@ -1,9 +1,9 @@
-/** 每日看板功能模块：今日 / 趋势 / AI。
- *  从置顶入口挪进「办公」分组 —— 办公组统一放每天的台面工作（看板、日历、模型用量、规划台），
- *  看板本身只做当天的浓缩视图，深度内容在各自页面。
+/**
+ * 每日看板：今日 `/dashboard` · 趋势与记录 `/dashboard/trend` · AI 助手 `/dashboard/ai`。
  *
- *  **开源版只带骨架**：课表 / 待办 / 早报那几类卡的数据源因人而异，已经整块摘掉；
- *  要加自己的卡，看 DashboardHome.vue 顶部的说明。 */
+ * 开源版只带骨架 —— 课表 / 待办 / 早报那几类卡的数据源因人而异（各校接口 / 本机服务都不一样），
+ * 已整块摘掉；要加自己的卡，看 `DashboardHome.vue` 顶部的说明。
+ */
 import type { WorkstationModule } from '@/core/types'
 
 export const dashboardModule: WorkstationModule = {

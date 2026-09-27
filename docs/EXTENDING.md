@@ -6,7 +6,19 @@
 
 - **内核不用改**。加功能只碰三处：新模块目录、`src/features/index.ts` 一行、需要后端时加 `server/lib/*.mjs` 与 `server/index.mjs` 里的路由。
 - **每一步都能验证**。每个小节末尾都写了「怎么知道这一步成了」。
-- **不确定的事不要猜**。写文档时提到的每个文件名、命令、行号都来自本仓库当前代码；你自己加东西时也照这个标准来（`npm run build` 与 `npm test` 是两条最便宜的护栏）。
+- **不确定的事不要猜**。写文档时提到的每个文件名与命令都来自本仓库当前代码；你自己加东西时也照这个标准来（`npm test` 与 `npm run build` 是两条最便宜的护栏）。
+  > 文档里**故意不写行号**：行号会被任何一次编辑弄漂，这个仓库已经因为「文档抄了行号」把读者带偏过一次（见 [ARCHITECTURE.md](ARCHITECTURE.md) §6.5）。要引用就引「文件 + 小节」或一段能 grep 到的原文。
+
+> **想少走一遍手工步骤**：本文第 2 章的每一步，`scripts/new-feature.mjs` 都能自动做完
+> （建文件、注册、图标白名单两处、按需的后端与配置），骨架取自 `src/features/_template/`。
+> 建议**先照着本文抄一遍**（知道每处在干嘛），再用生成器加第二个功能：
+>
+> ```bash
+> node scripts/new-feature.mjs reading --name 阅读笔记 --icon Reading --group study --api --config
+> ```
+>
+> 两条护栏替你兜底：`scripts/tests/module-contract.test.mjs`（注册表 / 图标 / 路由三条约定，
+> `npm test` 会跑到）与生成器自己的前置检查（锚点找不齐、id 或路由撞车、生成的页面 SFC 解析不过，都整体中止）。
 
 如果你还没把项目跑起来，先看 [README](../README.md) 的「快速开始」；本文默认你已经能打开 `http://127.0.0.1:5278/`（生产态）或 `127.0.0.1:5273`（开发态）。
 
@@ -46,7 +58,7 @@ export interface WorkstationModule {
 }
 ```
 
-`MODULE_GROUPS`（同文件）定义了五个大模块与它们的顺序：成长(3) → 办公(5) → 学习(10) → 待办(20) → 教务(30)。**出厂只有办公组与学习组里有人**；你把模块放进空组，那一组就会自己出现在侧边栏（`getGroupedModules()` 会过滤掉空组）—— 这是「加一个模块就等于加一个分区」的现成路子，不必改 `types.ts`。
+`MODULE_GROUPS`（同文件）定义了五个大模块与它们的顺序：成长(3) → 办公(5) → 学习(10) → 待办(20) → 校内(30)。**出厂只有办公组与学习组里有人**；你把模块放进空组，那一组就会自己出现在侧边栏（`getGroupedModules()` 会过滤掉空组）—— 这是「加一个模块就等于加一个分区」的现成路子，不必改 `types.ts`。
 
 > 现有的 `visible()` 用法只有两处，但它是内核级约定：`src/features/wiki/module.ts` 看 `wiki.dir` 填没填，`src/features/memo/module.ts` 看 `asr.baseUrl` 填没填。配置快照在 `src/core/appconfig.ts`（`cfgGet` / `cfgFilled`）——**它必须是同步的**，所以 `src/main.ts` 先 `loadAppConfig()` 拉一次存内存，**等它落地之后**才建路由（`void loadAppConfig().finally(…)`；拉不到时所有 `visible()` 一律当可见，避免慢启动期间侧边栏闪一下又变）。
 
@@ -70,7 +82,7 @@ function route(method, pattern, handler) {
   routes.push({ method, pattern, handler })
 }
 
-route('GET', /^\/api\/health$/, async () => ({ ok: true, service: 'workstation-sidecar', ... }))
+route('GET', /^\/api\/health$/, async () => ({ ok: true, service: 'workstation', ... }))
 ```
 
 请求进来后的顺序是（都在 `server/index.mjs` 的 `http.createServer` 回调里）：
@@ -141,11 +153,47 @@ route('POST', /^\/api\/reading\/note$/, async (req, { query, body, params, res }
   ```ts
   import { ElMessage } from 'element-plus'   // OK：样式已在 main.ts 全局引入
   ```
-- **图标**必须出现在 `src/main.ts` 的白名单里（`import` 与 `ICONS` 映射**两处都要加**）。图标是按字符串动态解析的（`<component :is="mod.icon">`），静态分析不出来，所以不能靠自动按需引入 —— 漏加的表现是「侧边栏 / 页面里那块是空白」。
+- **图标**必须出现在 `src/main.ts` 的白名单里（`import` 与 `ICONS` 映射**两处都要加**，源码里有两个 `// ↓ 新图标加在这里` 锚点）。漏加的表现是「侧边栏 / 页面里那块空白」+ 一条 Vue 解析警告，而**构建照样过**。
+
+  **这是全套约定里唯一一处「内核级例外」，值得知道为什么**：图标名在模板里是**字符串**（`<component :is="mod.icon">`、`<PageHeader icon="Setting">`），静态分析不出来，所以不能像组件那样交给 `unplugin-vue-components` 按需引入 —— 只能全局注册一份白名单。而白名单又**必须**这么写：命名导入 + 显式映射，**不能**改成 `import * as Icons` 再动态取键（`src/main.ts` 的注释写了原因：命名空间导入会让打包器无法摇树，294 个图标会全部进包，其中约 80% 用不到）。
+
+  三道网兜着这一步：源码锚点（两处必须一致）、`scripts/tests/module-contract.test.mjs`（模块/路由/分组用到的图标必须都在白名单里、且两处一致）、生成器（图标名要能在 `@element-plus/icons-vue` 里找到才放行）。
 
 ---
 
 ## 2. 加一个页面模块（完整步骤）
+
+### 先看这张表：你加的东西到底要动几个文件
+
+「内核不用改」是对的，但**不等于「一个文件都不用改」**。按你要的能力对号入座：
+
+| 你要做的 | 要动的文件 | 漏了会怎样 |
+|---|---|---|
+| **纯页面**（数据全在浏览器里） | ① `src/features/<id>/module.ts` ② 同目录的 `.vue` ③ `src/features/index.ts` 加一行 `registerModule()` | 侧边栏没这一项、路由表里没这条路由 |
+| 上面 ＋ **用现成边车接口** | 再在 `src/core/sidecar.ts` 的 `api` 里加一条 `call(...)` | 页面拿不到数据（`api.xxx is not a function` 更直接） |
+| 上面 ＋ **图标是新的** | 再改 `src/main.ts` 的**两处**：顶部 `import` 与 `ICONS` 映射 | **不报错**：侧边栏 / 页面里那块是空白。这是全套步骤里唯一静默失败的一步 |
+| 上面 ＋ **新后端能力** | 再：① `server/lib/<能力>.mjs` ② `server/index.mjs` 顶部 `import` ③ 同文件路由表末尾加 `route(...)`（有锚点注释） | 接口 404，前端显示「未知接口」 |
+| 上面 ＋ **新配置项** | 这三处**都要**：① `server/config.mjs` 的 `DEFAULTS` ② `server/lib/config-editable.mjs` 的白名单（**分节**还是**标量**，见 §3.4）③ `server/config.example.json` | 页面改不动那一项（PATCH 回 `rejected`）；`npm test` 会红（`scripts/tests/config-whitelist.test.mjs`） |
+| 上面 ＋ **给智能体用** | 再改 `server/mcp.mjs` 的 `TOOLS` 与 `HANDLERS`（**名字必须一致**） | 调用时回「未知工具：xxx」，没有测试拦 |
+| 上面 ＋ **开机自启 / 独立页面入口** | 不用改代码：`#/service`（`src/features/service/`）就是一个「只有一条接口、一个页面」的最小现成范本 | — |
+
+图标那一步、MCP 那一步都属于「漏了不报错」，所以它们各自在源码里留了锚点注释：
+`grep -rn "新图标加在这里" src/main.ts`、`grep -rn "新接口加在这里" server/index.mjs`。
+
+### 目录约定（先记住这三条，再动手）
+
+`src/features/` 下同时住着**功能模块**和**只被别处引用的共享组件**两类东西，
+所以「这个目录是不是一个模块」要按下面这条判据看，别照目录名猜：
+
+| 情况 | 怎么摆 | 现有例子 |
+|---|---|---|
+| 一个目录 = 一个模块 | 模块定义叫 `module.ts`，目录名 = 模块 `id` | `dashboard/` `plan/` `vocab/` `wiki/` `memo/` `guard/` `service/` |
+| 一个目录 = 多个模块 | 每个模块一个 `<id>.module.ts`，**没有** `module.ts` | `office/` → `calendar.module.ts`（id=calendar）+ `usage.module.ts`（id=office-usage） |
+| 只被别处引用的共享组件 | 放 `src/features/<域>/`，**不要**给它起模块文件 | `settings/` → `LlmSection.vue` / `EmbeddingSection.vue` / `SearchSection.vue`，被 `src/views/SettingsView.vue` 引用 |
+
+**唯一入口**是 `src/features/index.ts` 里的 `registerModule()` —— 目录里有没有文件、叫什么，
+注册表都不看，它只认你 `registerModule` 传进去的那个对象。
+同一个接口的说明也抄在 `src/core/types.ts`（`WorkstationModule` 上方），两边保持一致。
 
 下面以「阅读笔记」（`id: reading`，路径 `/reading`）为例，从零到能点开。
 
@@ -158,7 +206,9 @@ src/features/reading/
   Archive.vue      子页（可选）
 ```
 
-目录名与 `id` 保持一致，方便日后搜索（现有模块都遵守：`dashboard` / `plan` / `vocab` / `wiki` / `memo` / `guard`）。
+目录名与 `id` 保持一致，方便日后搜索 —— 单模块目录都遵守这条（`dashboard` / `plan` / `vocab` / `wiki` / `memo` / `guard` / `service`）。
+注意两个**反例**：`office/` 装了两个模块（所以是 `calendar.module.ts` / `usage.module.ts`），
+`settings/` 根本不是模块（只有三个被设置页引用的 Section 组件）。判据见上面的「目录约定」。
 
 ### 第 2 步：写 `module.ts`
 
@@ -277,7 +327,10 @@ export function registerAllModules(): void {
 
 ### 第 5 步：图标（最容易漏）
 
-用到的图标名必须在 `src/main.ts` 里**两处**都有：顶部的 `import { … } from '@element-plus/icons-vue'`，以及 `const ICONS = { … }` 映射。漏了的表现是页面里那块空白（控制台会有 Vue 的解析警告）。列表本身是有意只列用到的（命名导入才能摇树，`import * as Icons` 会把 294 个图标全打进包）。
+用到的图标名必须在 `src/main.ts` 里**两处**都有：顶部的 `import { … } from '@element-plus/icons-vue'`，以及 `const ICONS = { … }` 映射。漏了的表现是页面里那块空白（控制台会有 Vue 的解析警告），而构建照样过。列表本身是有意只列用到的（命名导入才能摇树，`import * as Icons` 会把 294 个图标全打进包）—— 这条为什么是「内核级例外」，见 §1.4 那一段。
+
+两处都有 `// ↓ 新图标加在这里` 锚点，`grep -rn "新图标加在这里" src/main.ts` 就能定位。
+`npm test` 里的 `scripts/tests/module-contract.test.mjs` 会替你查：模块 / 路由 / 分组用到的图标名必须都在白名单里，而且**两处必须一致** —— 漏了会红，不用等页面打开才发现。
 
 ### 第 6 步（可选）：`stats` / `badge` / `visible`
 
@@ -395,14 +448,21 @@ export const api = {
 
 ### 3.4 如果它需要配置项
 
-三处，缺一不可：
+**三处，缺一不可**（漏一处不会报错，只会在某个地方表现为「改不动」或「别人不知道有这一项」）：
 
 1. **`server/config.mjs` 的 `DEFAULTS`** —— 加一节（默认值一律**中性**：路径给空串、开关给保守值），例如：
    ```js
    /** 阅读笔记：库目录留空 = 模块不在侧边栏显示 */
    reading: { dir: '', maxNotes: 500 },
    ```
-2. **`server/index.mjs` 的 `CONFIG_EDITABLE`** —— 想让「设置与数据」页能改它，就把字段名加进白名单；没进白名单的字段调 `PATCH /api/config` 会被**拒绝并点名**（这是有意的护栏，别绕过）。
+2. **`server/lib/config-editable.mjs` 的白名单** —— 想让「设置与数据」页能改它，就要挂上去。
+   这份白名单**分两张表，按「这一项在 `config.json` 里是什么形状」分**：
+   - 值是**对象**（一整个分节）→ 加进 `CONFIG_EDITABLE` 的对应分节数组（`reading: ['dir', 'maxNotes']`）；
+   - 值是**字符串 / 数字 / 布尔**（标量，例如「输出语言」那种单值下拉）→ 加进 `CONFIG_EDITABLE_SCALARS`。
+     **标量项误放进 `CONFIG_EDITABLE`（尤其写成空数组）的后果是永远改不动**：分发处的分节循环用
+     `typeof v !== 'object'` 判形状，字符串一律被当成「无效分节」扔进 `rejected`，
+     而页面把 HTTP 200 当成功 —— `outputLanguage` 真踩过这一脚（2026-09-27 修）。
+   没进白名单的字段调 `PATCH /api/config` 会被**拒绝并点名**（这是有意的护栏，别绕过）。
 3. **密钥**：如果这一项是密钥（token / API Key / 密码），加进 `server/config.mjs` 的 `SECRET_PATHS`：
    ```js
    ['reading', 'apiKey'],
@@ -410,6 +470,11 @@ export const api = {
    这样保存时它会自动落到 `server/credentials.json`，`/api/config` 返回时自动脱敏成 `****后四位`；`saveConfig` 也会把脱敏串与空串当成「不改」，避免一次保存把真值冲掉。
 
 **不要**把默认值写成某台机器上的绝对路径、也不要写进 `config.example.json` 之外的任何地方；`config.example.json` 里要同步补一条带说明的项（贡献约定见 README）。
+路径一律写**正斜杠**（反斜杠会被 JSON 当转义吃掉，见 `server/config.example.json` 里那条 `startupDir` 的教训）。
+
+**第四处是白拿的**：加完跑 `npm test`。`scripts/tests/config-whitelist.test.mjs` 会把
+`DEFAULTS` / 两张白名单 / `config.example.json` 三方对账，上面任何一步漏了它都会红并点名，
+逐项说明见 [CONFIG.md §10](CONFIG.md)。
 
 ### 3.5 顺手挂到 MCP（可选）
 
@@ -647,11 +712,11 @@ route('POST', /^\/api\/memo\/upload$/, (req, { body, query }) => {
 2. **不要在一个请求里等长任务**。5 分钟的 `requestTimeout` 会在最需要它的时候掐掉你（§5.1）。
 3. **不要自己 `fs.writeFileSync` 写业务 JSON**。绕过原子写，一次中断就是半截文件；绕过 `.bak` 与快照，坏了就没得回退；绕过 `rev`，并发写会静默丢数据。用 `createJsonStore`（§4）。
 4. **不要在路由处理器里 `throw`**。兜底会把请求收成 500 + `接口内部出错：…`（`server/index.mjs` 的分发处），但那是最后一道网。返回 `{ ok:false, error:'人话' }`，让页面能直接把原因显示出来。
-5. **不要把密钥、令牌、个人绝对路径写进代码 / 模块定义 / 文档**。密钥进 `SECRET_PATHS`（落 `credentials.json`），路径进 `DEFAULTS` 且默认留空；`config.example.json` 里用中性示例（`C:\资料\我的笔记`、`/path/to/doc.pdf`），**不要拿作者本机的路径当示例** —— 那是误导不是配置。
+5. **不要把密钥、令牌、个人绝对路径写进代码 / 模块定义 / 文档**。密钥进 `SECRET_PATHS`（落 `credentials.json`），路径进 `DEFAULTS` 且默认留空；`config.example.json` 里用中性示例（`C:\资料\我的笔记`、`/path/to/doc.pdf`），**不要拿作者机器的路径当示例** —— 那是误导不是配置。
 6. **不要为了加功能改内核**（`src/core/*`、`src/router/index.ts`、`src/shell/AppShell.vue`）。注册表已经派生了导航与路由；改内核意味着所有模块跟着你漂。真需要内核级能力（新的可见性钩子、新的分组），那是一次单独的、要想清楚向后兼容的改动。
 7. **不要另起一套 localStorage key**。走 `@/core/storage` 的 `loadJSON/saveJSON`，它统一挂在 `workstation.` 命名空间下，设置页的「导出 / 恢复 / 清理」才认得出你的数据。
 8. **不要在 `.vue` 里显式 import Element Plus 的组件**（模板里写标签，按需插件负责样式）。唯一例外是 `ElMessage` / `ElMessageBox` —— `main.ts` 全局引了它们的样式，显式 import 是安全的（现有十几个文件都这么写）。
-9. **不要用没进白名单的图标名**。图标是运行时按字符串解析的，漏了就是空白；`src/main.ts` 的 `import` 与 `ICONS` 两处要同步。
+9. **不要用没进白名单的图标名**。图标是运行时按字符串解析的，漏了就是空白；`src/main.ts` 的 `import` 与 `ICONS` 两处要同步。`npm test` 会拦（`scripts/tests/module-contract.test.mjs`：图标必须在白名单里，且两处一致）。
 10. **不要把 `router-view` 包进 `<transition>`**。`src/App.vue` 的注释写了原因：Vue 的过渡靠 `transitionend`，渲染被节流或暂停时（后台标签、无头环境）旧页面会永久残留 —— 表现为切换路由后新旧页面同时挂在 DOM 上。
 11. **不要在 MCP 里只改一半**：`TOOLS` 要写 `name`，`HANDLERS` 要有同名方法。写错只在调用时回「未知工具」，没有测试会拦你（`server/mcp.mjs`）。
 12. **不要忽略 `visible()`**。依赖没配好就让它从侧边栏消失，比让人点进去看一页报错体贴，而且是内核约定（`src/core/appconfig.ts`）。
@@ -676,4 +741,6 @@ route('POST', /^\/api\/memo\/upload$/, (req, { body, query }) => {
 | 「每日一句」句库怎么导 | [每日一句导入.md](每日一句导入.md) |
 | 文件传输 provider 要实现哪些函数 | [文件传输.md](文件传输.md) |
 | 页面上的三步上手示例 | `#/dev-guide`（`src/views/DevGuideView.vue`） |
-| 现成的写法参照 | 模块：`src/features/plan/`（最简）、`src/features/vocab/`（多子页 + store）、`src/features/wiki/`（最复杂）<br>边车：`server/lib/plan.mjs`（jsonstore）、`server/lib/memo.mjs`（长任务 + SSE）、`server/lib/wiki-queue.mjs`（落盘队列） |
+| **想跳过手工步骤**：一条命令生成模块骨架（含注册、图标白名单、按需的后端与配置） | `node scripts/new-feature.mjs --help`；骨架与逐项替换表在 `src/features/_template/` |
+| 谁在替我守这些约定（注册表 / 图标 / 路由 / 配置白名单） | `scripts/tests/module-contract.test.mjs`、`scripts/tests/config-whitelist.test.mjs` —— `npm test` 会跑到；CI 见仓库根 `.github/workflows/ci.yml` |
+| 现成的写法参照 | 模块：`src/features/plan/`（最简）、`src/features/service/`（一页 + 一条接口，最小完整例）、`src/features/vocab/`（多子页 + store）、`src/features/wiki/`（最复杂）<br>边车：`server/lib/plan.mjs`（jsonstore）、`server/lib/memo.mjs`（长任务 + SSE）、`server/lib/wiki-queue.mjs`（落盘队列） |

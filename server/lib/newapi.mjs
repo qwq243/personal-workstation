@@ -11,7 +11,7 @@
 import { loadConfig } from '../config.mjs'
 import { request } from './net.mjs'
 
-/** quota → 元（已用截图日志标定 500000 quota = 1 元） */
+/** quota → 元（按上游默认 500000 quota = 1 元） */
 export const QUOTA_PER_YUAN = 500000
 
 export function quotaToYuan(q) {
@@ -61,7 +61,7 @@ function panelRequest(url, opts = {}) {
  *   apiKey  —— credentials.json 的 `llm.keys.workstation`（设置页里填，只落本机）
  * 模型清单是 `ai.models`（可选项，留空就让调用方直接用 `ai.model`）。
  *
- * 这样开源版不需要任何作者本机的路径，谁填谁的。
+ * 这样开源版不需要任何作者机器的路径，谁填谁的。
  */
 export function aiProvider() {
   const all = loadConfig()
@@ -87,7 +87,12 @@ export function aiModels() {
 /**
  * OpenAI 兼容的对话补全。messages 为 [{role, content}]。
  * 返回 { ok, content, reasoning, usage, model } 或 { ok:false, error }。
+ *
+ * maxTokens 是**调用方**的事（走 lib/llm.mjs 的预算档位）；本层只在没人给时兜底，
+ * 且兜底值必须够大 —— 思考模型与正文共用这份预算，给小了正文就是空串，而且不报错。
  */
+export const FALLBACK_MAX_TOKENS = 8000
+
 export async function chat(messages, { model, maxTokens, temperature, timeout = 120000, extraBody } = {}) {
   const ai = loadConfig().ai
   const prov = aiProvider()
@@ -96,7 +101,7 @@ export async function chat(messages, { model, maxTokens, temperature, timeout = 
   const body = {
     model: model || ai.model,
     messages,
-    max_tokens: maxTokens ?? ai.maxTokens,
+    max_tokens: maxTokens ?? FALLBACK_MAX_TOKENS,
     temperature: temperature ?? ai.temperature,
     ...(extraBody && typeof extraBody === 'object' ? extraBody : {}),
   }
@@ -142,7 +147,7 @@ export async function chatStream(messages, { model, maxTokens, temperature, time
   const body = {
     model: model || ai.model,
     messages,
-    max_tokens: maxTokens ?? ai.maxTokens,
+    max_tokens: maxTokens ?? FALLBACK_MAX_TOKENS,
     temperature: temperature ?? ai.temperature,
     stream: true,
     ...(extraBody && typeof extraBody === 'object' ? extraBody : {}),
@@ -266,16 +271,14 @@ const COUNT_TIMEOUT_MS = 8000
  * 每个令牌两个请求：stat 给花费，log 给条数。stat 只返回 {quota,rpm,tpm}，
  * 没有条数，所以条数只能单独查 total，省不掉。
  *
- * ## page_size 必须写 0，不能写 1（2026-09-23 实测，这是本函数唯一的坑）
- * 原来条数查询写的是 `p=1&page_size=1`。12 个令牌并发查时：
- *   - 10 个正常返回（0.3–1.9s）
- *   - 某两个令牌要 8.9s 到 20s（20s 就是打满超时）
- * Promise.all 等最慢的那个，于是本函数恒定 15.3s —— 它同时在 gatherContext
- * （AI 总结/复盘）和 /api/newapi/summary（MCP 的 get_balance）的路径上，
+ * ## page_size 必须写 0，不能写 1（这是本函数唯一的坑）
+ * 原来条数查询写的是 `p=1&page_size=1`。并发查一批令牌时，总会遇到少数令牌很慢
+ * （最慢的打满超时），Promise.all 等最慢的那个，于是本函数被恒定拖到十几秒 ——
+ * 它同时在 gatherContext（AI 总结/复盘）和 /api/newapi/summary（MCP 的 get_balance）的路径上，
  * 是「ai.today 要 30–40s」里非模型的那一半。
  *
- * 改成 `page_size=0` 后，同样的令牌：最慢的从 20s 降到 1.2s，
- * **total 与 page_size=1 逐条一致**（逐个令牌核对过）。
+ * 改成 `page_size=0` 后，同样的令牌：最慢的从打满超时降到 1s 出头，
+ * **total 与 page_size=1 逐条一致**（逐个核对过）。
  * 也就是说这是上游「取 0 行只要计数」和「取 1 行顺带计数」的代价差，不是数据量问题，
  * 换写法即可，不需要把条数降级成「未知」。
  *

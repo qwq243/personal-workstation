@@ -14,14 +14,15 @@ const router = useRouter()
 const ui = useUiStore()
 
 const modules = computed(() => getModules())
-/** 置顶入口（服务与自启这类本机工具）：不参与分组 */
+/** 置顶入口（`category` 留空的模块，当前是「进程守护」与「运行与自启」）：不参与分组，固定在导航最上方 */
 const pinned = computed(() => getPinnedModules())
-/** 按大模块分组（成长 / 办公 / 学习 / 待办 / 教务） */
+/** 按大模块分组（成长 / 办公 / 学习 / 待办 / 校内），空组不下发 —— 见 registry.ts 的 getGroupedModules() */
 const groups = computed(() => getGroupedModules())
 
 /** 当前激活的功能模块：按各模块路由做最长前缀匹配。
- *  不能只看路径第一段 —— 同一个一级路径下挂着不同分组的子页（例如本机服务类页面）
- *  第一段都是 paper，但分属不同模块。 */
+ *  不能只看路径第一段 —— 同一个一级路径下可能挂着不同模块的子页
+ *  （现成例子：`/office/calendar` 与 `/office/usage` 分属 calendar 与 office-usage 两个模块，
+ *   `/wiki` 下面还挂着 `/wiki/chat`、`/wiki/p/:slug` 这类深层路径）。 */
 const activeModuleId = computed(() => {
   const p = route.path
   let best = ''
@@ -42,7 +43,7 @@ const activeModuleId = computed(() => {
 
 /** 当前功能下的二级导航（来自该功能路由里带 meta.title 的项）。
  *  二级项**不取 meta.icon** —— 层级靠「缩进 + 导轨 + 小一号字」表达，
- *  一排图标反而会和一级项抢注意力（2026-09-20 用户确认）。 */
+ *  一排图标反而会和一级项抢注意力。 */
 const subNav = computed(() => {
   const mod = modules.value.find((m) => m.id === activeModuleId.value)
   if (!mod) return []
@@ -86,7 +87,7 @@ function cycleTheme() {
       </div>
 
       <nav class="nav">
-        <!-- 置顶入口：服务与自启这类本机工具（不参与大模块分组） -->
+        <!-- 置顶入口：没有 category 的模块（进程守护 / 运行与自启），不参与大模块分组 -->
         <div
           v-for="mod in pinned"
           :key="mod.id"
@@ -101,7 +102,7 @@ function cycleTheme() {
           <span v-show="!ui.sidebarCollapsed" class="nav__text">{{ mod.name }}</span>
         </div>
 
-        <!-- 大模块：成长 / 办公 / 学习 / 待办 / 教务 -->
+        <!-- 大模块：成长 / 办公 / 学习 / 待办 / 校内 -->
         <template v-for="g in groups" :key="g.group.id">
           <div v-if="!ui.sidebarCollapsed" class="nav__group">
             <el-icon class="nav__group-icon"><component :is="g.group.icon" /></el-icon>

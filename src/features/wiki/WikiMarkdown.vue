@@ -1,5 +1,13 @@
 <script setup lang="ts">
 /**
+ * KaTeX 样式（23.8K CSS + 40 多个 @font-face）只有这里用得着 —— 正文里 $...$ 真 LaTeX
+ * 走 math-typeset.ts 的 katex.renderToString。原先引在 main.ts 的全局入口，等于每个页面
+ * 都为知识库的公式付一份 CSS 与字体声明；挪到这里，Vite 把它打进知识库的懒加载 chunk。
+ * 裸上下标那套（e^{x}、∫_0^∞）是自己排的、不吃这份 CSS。
+ */
+import 'katex/dist/katex.min.css'
+
+/**
  * 知识库用的 markdown 渲染（零依赖）。
  *
  * 为什么不用 MdLite：那个是给看板/简报用的「只要标题、列表、加粗」的极简版，

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """边车保活：Popen(node) + 长驻轮询。用 run_in_background 挂着，
-后台任务存活期间 node 不被沙箱回收；机器重启场景由 Startup VBS 覆盖。"""
+后台任务存活期间 node 不会被回收；机器重启场景由 Startup VBS 覆盖。"""
 import os, shutil, subprocess, time, urllib.request
 
 # 路径都不写死本机：项目根 = 本文件的上两级目录（scripts/ 的父目录）；
@@ -48,7 +48,7 @@ def start_node():
     for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         env.pop(k, None)
     env["NO_PROXY"] = "*"
-    # wt.exe 会脱离沙箱 job；直接 Popen(node, DETACHED) 在部分会话里会被立刻回收
+    # wt.exe 会脱离父进程所在的作业对象；直接 Popen(node, DETACHED) 在部分会话里会被立刻回收
     if os.path.exists(WT):
         return subprocess.Popen(
             [WT, "-d", ROOT, NODE, os.path.join(ROOT, "server", "index.mjs")],

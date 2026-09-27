@@ -1,16 +1,15 @@
 /**
  * 检索层：网络搜索（7 家 provider）+ 本机文件搜索（AnyTXT）。
  *
- * 按已退役的桌面端那套实现移植：请求形状、字段映射、结果上限都跟它对齐，
- * 所以两边换着用行为一致。
- * 与桌面端的差异只有一处：**没有代理客户端封装**（它自己包了一层系统代理），
- * 这里用 Node 的 fetch；要在代理后面跑就在 config.json 的 wiki.network.proxy 里填地址，
- * 这里会按需包一层（见 fetchJson）。
+ * 请求形状、字段映射、结果上限都按各家公开的 API 文档写。
  *
- * 三家在本机被墙、两家通了（2026-09-24 实测）：tavily / brave 超时；firecrawl / bocha / serpapi /
- * ollama.com 的 405/200 说明端点可达。选哪家由用户定，这里只如实报错，不做「悄悄换一家」。
+ * **没有代理客户端封装**：这里用 Node 的 fetch；要在代理后面跑就在 config.json 的
+ * wiki.network.proxy 里填地址，这里会按需包一层（见 fetchJson）。
  *
- * 结果统一成 { title, url, snippet, source } —— 与桌面端的返回结构同形。
+ * 部分 provider 在受限网络下可能不可达（超时 / 403 这类）：选哪家由用户定，
+ * 这里只如实报错，不做「悄悄换一家」。
+ *
+ * 结果统一成 { title, url, snippet, source }。
  */
 import { loadConfig, saveConfig } from '../config.mjs'
 
@@ -19,11 +18,11 @@ const TIMEOUT_MS = 20000
 export const PROVIDERS = [
   { id: 'none', label: '不用网络搜索', hint: '问答只用库内页面与本地文件', keyKind: 'none' },
   { id: 'ollama', label: 'Ollama Web Search', hint: 'ollama.com 的联网搜索 API，需要 Ollama API key', keyKind: 'key', defaultUrl: 'https://ollama.com' },
-  { id: 'tavily', label: 'Tavily', hint: '通用网络搜索（本机网络实测不通）', keyKind: 'key' },
+  { id: 'tavily', label: 'Tavily', hint: '通用网络搜索', keyKind: 'key' },
   { id: 'serpapi', label: 'SerpApi', hint: 'Google / Bing / DuckDuckGo / Scholar / News / 图片 / 视频 / YouTube', keyKind: 'key' },
   { id: 'searxng', label: 'SearXNG', hint: '自建元搜索（JSON API），不用 key', keyKind: 'url' },
   { id: 'firecrawl', label: 'Firecrawl', hint: '匿名或带 key 都行', keyKind: 'optional-key' },
-  { id: 'brave', label: 'Brave Search', hint: '独立索引（本机网络实测不通）', keyKind: 'key' },
+  { id: 'brave', label: 'Brave Search', hint: '独立索引', keyKind: 'key' },
   { id: 'bocha', label: 'Bocha 博查', hint: '中文与全球网页搜索', keyKind: 'key' },
 ]
 
@@ -174,7 +173,7 @@ function pick(obj, keys) {
   return ''
 }
 
-/** 把各家形状不一的结果抹平成同一套字段（对照桌面端的做法） */
+/** 把各家形状不一的结果抹平成同一套字段 */
 function norm(item, source) {
   const meta = item?.metadata ?? {}
   return {
@@ -315,7 +314,7 @@ export async function anyTxtStatus() {
   return { ok: true, running: res.status > 0, endpoint, httpStatus: res.status, raw: res.json ? 'json' : 'text' }
 }
 
-/** 本机文件搜索（照桌面端那套 AnyTXT JSON-RPC 调用形状） */
+/** 本机文件搜索（AnyTXT 的 JSON-RPC 调用形状） */
 export async function anyTxtSearch(query, { maxResults } = {}) {
   const c = cfg()
   const q = String(query ?? '').trim()

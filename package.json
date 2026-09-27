@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "个人工作站（开源副本）—— 可扩展的多功能学习 / 效率台",
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -16,7 +19,9 @@
     "test:parity": "node --experimental-strip-types scripts/parser-parity.mjs",
     "test:pguard": "node scripts/pguard-smoke.mjs --no-start",
     "demo:seed": "node scripts/seed-demo-data.mjs",
-    "demo:reset": "node scripts/seed-demo-data.mjs --reset"
+    "demo:reset": "node scripts/seed-demo-data.mjs --reset",
+    "autostart:on": "node scripts/panel-autostart.mjs enable",
+    "autostart:off": "node scripts/panel-autostart.mjs disable"
   },
   "dependencies": {
     "@element-plus/icons-vue": "2.3.2",

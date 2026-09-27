@@ -368,9 +368,9 @@ function agentOf(proc) {
 /**
  * 树走到 shell 为止。
  *
- * 为什么：智能体（尤其 GUI 型的 ZCode）会把工具调用交给 cmd/pwsh 去跑，那些 shell 又生下
- * 一堆 node/python —— 如果一路往下走，一个 ZCode 会话会「包含」174 个进程、5.6 GB，
- * 那是这台机器半天里跑过的所有东西，不是这个智能体的进程。
+ * 为什么：GUI 型智能体会把工具调用交给 cmd/pwsh 去跑，那些 shell 又生下一堆 node/python ——
+ * 如果一路往下走，会话就会把「这台机器半天里跑过的所有东西」都算成自己的进程，
+ * 规模虚高、也不是这个智能体本身的占用。
  * 走到 shell 就停，语义上正好：shell 下面的是「你在终端里跑的命令」，不算智能体自己。
  */
 const SHELL_BOUNDARY = /^(cmd|conhost|openconsole|pwsh|powershell|bash|sh|dash|zsh|wsl|nushell|nu|busybox|windowsterminal|wt)\.exe$/i

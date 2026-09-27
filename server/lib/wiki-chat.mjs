@@ -1,7 +1,7 @@
 /**
  * 知识库问答：会话式、有依据、带检索预判。
  *
- * 与「非流式一次性问答」的区别（也是桌面端 Chat 面板的形态）：
+ * 与「非流式一次性问答」的区别：
  *   1. **会话**：一次问答存一条会话（server/data/wiki-chats.json），可以回来接着问；
  *   2. **先检索、再作答**：命中页面直接进上下文，再让模型判断「还缺什么」补一轮检索
  *      （多跳问题——比如「作者怎么看比较法」——只搜一次常常搜不全）；
@@ -9,7 +9,7 @@
  *   4. **只依据库内页面回答**，末尾标依据；库里没有就直说。
  *
  * 模型与技能（skills）都跟着工作台走：模型用 config.json 的 ai.*（或用 wiki.model 覆盖），
- * 技能读库里的 .llm-wiki/skills/*.md —— 与桌面端同一套约定，但不再有第二份 LLM 配置。
+ * 技能读库内的技能目录（`.workstation-kb/skills/*.md`），只有这一份 LLM 配置。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -18,6 +18,7 @@ import { writeAtomic } from './jsonstore.mjs'
 import * as wiki from './wiki.mjs'
 import * as llm from './wiki-llm.mjs'
 import * as websearch from './wiki-websearch.mjs'
+import { budgetFor } from './llm.mjs'
 
 /* ------------------------------------------------------------ 存储 --- */
 
@@ -106,12 +107,11 @@ export function deleteSession(id) {
 /* ------------------------------------------------------------ 技能 --- */
 
 /**
- * 库内技能：.llm-wiki/skills/*.md 的第一行当名字，其余当正文。
- * 与桌面端约定一致（它的 skills 参数就是这么用的）：选中的技能会拼进系统提示，
- * 用来固定输出风格（例如「回答先给结论」「用表格对比」）。
+ * 库内技能：`.workstation-kb/skills/*.md` 的第一行当名字，其余当正文。
+ * 选中的技能会拼进系统提示，用来固定输出风格（例如「回答先给结论」「用表格对比」）。
  */
 export function skills() {
-  const dir = path.join(wiki.root(), '.llm-wiki', 'skills')
+  const dir = path.join(wiki.root(), '.workstation-kb', 'skills')
   if (!fs.existsSync(dir)) return []
   const out = []
   for (const f of fs.readdirSync(dir)) {
@@ -128,7 +128,7 @@ export function skills() {
 }
 
 function skillText(ids) {
-  const dir = path.join(wiki.root(), '.llm-wiki', 'skills')
+  const dir = path.join(wiki.root(), '.workstation-kb', 'skills')
   const parts = []
   for (const id of ids ?? []) {
     const f = path.join(dir, `${id}.md`)
@@ -161,7 +161,7 @@ async function gather(question, { runner, deep = true, topK = 6, tools = {}, ret
   add(first.results, first.mode)
   onEvent?.({ type: 'tool', name: '检索库内', detail: `${first.mode === 'hybrid' ? '词法+语义' : first.mode} 命中 ${first.total ?? first.results.length} 页` })
 
-  // 网络搜索 / 本机文件：跟桌面端一样按轮开启（tools.web / tools.anytxt）
+  // 网络搜索 / 本机文件：按轮开启（tools.web / tools.anytxt）
   if (tools.web) {
     const w = await websearch.webSearch(question, { maxResults: retrieval.webTopK ?? 5 })
     if (w.ok) {
@@ -204,7 +204,9 @@ async function gather(question, { runner, deep = true, topK = 6, tools = {}, ret
             role: 'user',
             content: `问题：${question}\n\n库内页面清单（slug｜标题）：\n${catalog.slice(0, 4000)}`,
           },
-        ], { maxTokens: 300, temperature: 0.2, timeout: 60000 })
+          // 预算别按"这条只要一个 JSON"来拍：思考 token 与正文共用预算，300 会让正文变空串，
+          // 而空串在这里只是「补检索不再补充」——静默降级，看不出是预算问题。
+        ], { maxTokens: budgetFor('short').first, temperature: 0.2, timeout: 60000 })
       : { ok: false }
     if (plan.ok) {
       let parsed = null

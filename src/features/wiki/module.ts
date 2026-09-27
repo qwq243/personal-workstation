@@ -1,14 +1,9 @@
 /**
- * 知识库。页面名用中文、id 与文件名用英文领域名（wiki ↔ `server/lib/wiki*.mjs`）。
+ * 知识库：抓文入库 → 编译成互链页面 → 语义检索 / 双链图谱 / 会话问答 / 结构体检。
  *
- * **层级（2026-09-24 整理）**：侧边栏只留 4 个入口，同级视图收进页内标签 ——
- *   库     `/wiki`          概览 · 页面 · 搜索 · 图谱 · 体检（五个同级视图，同一个入口）
- *   问答   `/wiki/chat`     会话式流式问答（信息密度与交互都跟别的页不同，独立成页）
- *   入库   `/wiki/ingest`   抓链接 / 导文件 / 队列 / 源目录监听
- *   设置   `/wiki/settings` 多库 / 文档解析 / 模型 / 语义检索 / 环境
- * 早先是 8 个平级子项，侧边栏一展开就把别的分组挤下去。旧路径全部保留为
- * hideInNav 的深链（`/wiki/browse`、`/wiki/search`、`/wiki/graph`、`/wiki/review`、
- * `/wiki/p/:slug`），落到同一个工作区并打开对应标签 —— 已发出去的链接不会断。
+ * 侧边栏只留 4 个入口（库 / 问答 / 入库 / 设置），同级视图收进页内标签，不再拆平级子项。
+ * 旧路径（`/wiki/browse`、`/wiki/search`、`/wiki/graph`、`/wiki/review`、`/wiki/p/:slug`）
+ * 全部保留为 hideInNav 深链，落到同一工作区并打开对应标签 —— 已发出去的链接不许断。
  */
 import type { WorkstationModule } from '@/core/types'
 import { cfgFilled } from '@/core/appconfig'

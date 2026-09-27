@@ -16,11 +16,11 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const fe = await import(pathToFileURL(path.join(ROOT, 'src/features/vocab/parser.ts')).href)
 const be = await import(pathToFileURL(path.join(ROOT, 'server/lib/vocab.mjs')).href)
 
-/** 仓库根目录下的真实词单文件（单词导入-*.txt），有就拿来做真实数据用例 */
+/** 仓库根目录下的任意 *.txt 词单（可选）。个人词单不在仓库里（见 .gitignore），有就拿来做真实数据用例 */
 function realWordFiles() {
   try {
     return readdirSync(ROOT)
-      .filter((f) => /^单词导入-.*\.txt$/.test(f))
+      .filter((f) => f.toLowerCase().endsWith('.txt'))
       .map((f) => [f, readFileSync(path.join(ROOT, f), 'utf8')])
   } catch {
     return []

@@ -22,10 +22,13 @@
 | **语音随记** | `memo` | `#/memo` | 传一段录音 → 转写 → 自动起标题写摘要 → 落成一条可回看的记录 | OpenAI 兼容的 `/audio/transcriptions`（**必需**）+ 模型端点（写摘要） | `asr.baseUrl`（+ 可选 `asr.apiKey`、`llm.keys`）。**没配就从侧边栏隐藏** | `data/memo/{records.json, records/*.md, inbox/, jobs.json, settings.json}` |
 | **进程守护** | `guard` | `#/process-guard` | 按 CPU 阈值释放开发工具内存、结束失控进程、定时回收内存；另带端口与智能体两个视图 | **无**（只用 Windows 自带命令 + PowerShell） | 无（出厂**演练模式**：照常判定、写审计，不动手） | `data/pguard/{config.json,actions.jsonl,engine.log}`、`data/procscan-actions.jsonl` |
 
-关于「置顶区」：`guard` 没有 `category`（`src/features/guard/module.ts:16`），
-所以它是不分组的置顶入口。其余模块分属 `office`（看板/日历/用量/规划台/随记）
+| **运行与自启** | `service` | `#/service` | 边车自身状态（端口 / PID / node / 入口）＋ 开机自启位体检与开启 / 关闭 / 删除 | **无**（操作的是启动文件夹，不联网；Windows 专有） | 无 | `scripts/Workstation.vbs`（运行时生成，不进版本库）、`logs/sidecar-autostart.log` |
+
+关于「置顶区」：`guard` 与 `service` 都没有 `category`（`src/features/guard/module.ts` /
+`src/features/service/module.ts`），所以它们是不分组的置顶入口。
+其余模块分属 `office`（看板/日历/用量/规划台/随记）
 与 `study`（英语学习/知识库）两组；`growth`、`todo`、`campus` 三组出厂为空
-（`MODULE_GROUPS` 里留着，等你自己加模块时用 —— 尤其 `campus` 是给教务类留的位）。
+（`MODULE_GROUPS` 里留着，等你自己加模块时用 —— 尤其 `campus` 是给校内类留的位）。
 
 ### 1.1 几个模块的已知缺口（不是没做完，是没数据源）
 
@@ -34,7 +37,7 @@
 | 日历日程 | **课表层恒为空**：它读 `overview.schedule.weekDays`（`CalendarView.vue:159`）与 `overview.semester.week`（`:283`），而这两个字段在开源版边车里**已经不存在**（`buildOverview()` 只返回 balance / spend / plan / streak / vocab / school / ai，`server/index.mjs:179-196`；全 `server/` 里 `schedule` 零命中）。于是每天都显示「这一天没有课」，「停课 N 节」与「满课」图例永不出现。教学周仍正常（走校历那条路）。模块描述里的「看课表」是超范围的 | 见 [ARCHITECTURE.md §6.5](ARCHITECTURE.md) |
 | 每日看板 | 只带**骨架与存储**：计划 / 记录 / 心情 / 复盘 + AI 总结卡是完整可用的；但课表卡、待办卡、签到卡、早报卡**没有随仓库分发**（它们的来源因人而异） | `src/features/dashboard/module.ts:5-6`、`DashboardHome.vue:7` |
 | 进程守护 | **没有「结束任意进程」的手动入口**（设计上划掉的：手动结束会绕过演练开关与动作预算）。页面只提供可逆的「释放内存」与需要一次 UAC 的「清系统待机列表」 | `GuardView.vue:10`、`server/index.mjs:659-664` |
-| 自启 | 接口在（`/api/panel/status`、`/api/panel/autostart`），但**没有页面调用它** —— 自启只能靠接口/脚本开 | 见 [ARCHITECTURE.md §4.3](ARCHITECTURE.md) |
+| 自启 | **已收口（2026-09-27）**：`#/service`（`src/features/service/`）把 `/api/panel/{sidecar,status,autostart}` 三条接口接上了页面；此前这几个接口是活的但没有页面调用 | 见 [ARCHITECTURE.md §4.3](ARCHITECTURE.md) |
 
 ---
 
@@ -65,7 +68,8 @@
 | `auth.mjs` | 82 | Origin 白名单 + 本地令牌 | 直接解决「任意网页可 fetch 回环端口」这个洞 |
 | `singleton.mjs` | 157 | 只认本项目入口的单实例闸 | 详见 [ARCHITECTURE.md §4.1](ARCHITECTURE.md) |
 | `autostart.mjs` | 202 | 启动文件夹自启位通用管理（`.lnk` + `.vbs`） | UTF-16LE+BOM 那套实测结论在 `:6-19` |
-| `panel.mjs` | 232 | 工作站自身的自启位生成 / 体检 / 开关 | node 路径取 `process.execPath`，不写死 |
+| `panel.mjs` | 232 | 工作站自身的自启位生成 / 体检 / 开关 | node 路径取 `process.execPath`，不写死。页面在「运行与自启」`#/service` |
+| `config-editable.mjs` | 78 | `PATCH /api/config` 的白名单（分节表 + 标量表） | 独立成文件才能被 `scripts/tests/config-whitelist.test.mjs` 与 `DEFAULTS` / `config.example.json` 对账 |
 | `elevate.mjs` | 87 | 一次性 UAC 提权执行 | 结果经临时文件回传；脚本必须 UTF-8 **带 BOM** |
 | `llm.mjs` | 97 | 大模型输出预算守卫 | 「思考 token 吃光正文」：预算按输入算、正文过短自动加倍重跑 |
 | `procscan.mjs` | 495 | 进程 / 端口 / 智能体视图 + 结束进程的保护层与审计 | 保护层六条判据；结束动作必须过它 |
@@ -167,17 +171,40 @@ npm run build        # 构建前端到 dist/
 npm run start        # 生产启动（没有 dist 就先构建）= 双击「启动工作站.cmd」
 npm run typecheck    # vue-tsc --noEmit
 
-npm test             # 纯逻辑回归（node:test，scripts/tests/*.test.mjs）
+npm test             # 纯逻辑回归（node:test，4 个文件 36 个用例）
 npm run test:parity  # 前后端两套词条解析器对拍（需要真实词单）
-npm run test:pguard  # 进程守护的判定（只读 + 演练模式，--no-start）
+npm run test:pguard  # 进程守护的判定（只读 + 演练模式，--no-start；Windows 真机）
 
 npm run demo:seed    # 写示例看板/规划台数据（日期按「今天」推算）
 npm run demo:reset   # 清回空结构
+
+npm run autostart:on  # 开（或重建）开机自启位 = node scripts/panel-autostart.mjs enable
+npm run autostart:off # 关自启位（不删文件）= …… disable
+```
+
+**两个「加东西」的入口**（不是 npm script，直接跑文件）：
+
+```bash
+node scripts/new-feature.mjs --help                     # 生成一个功能模块骨架（含注册与图标白名单）
+node scripts/panel-autostart.mjs status                 # 自启位体检（只读）；另有 enable/disable/remove/open-startup
 ```
 
 其它脚本（`scripts/`）：`english-daily-parse.mjs` / `english-daily-build.mjs`（MinerU 结果 → 句库）、
 `seed-demo-data.mjs`（示例数据）、`restart-sidecar.py` / `sidecar-keepalive.py`（重启与保活，
-node 路径从 `WS_NODE` 或 PATH 找）、`pguard-smoke.mjs`（判定基线）。
+node 路径从 `WS_NODE` 或 PATH 找）、`pguard-smoke.mjs`（判定基线）、
+`new-feature.mjs` + `lib/feature-scan.mjs` + `_template` 的生成器那一套（见 §6.1）、
+`panel-autostart.mjs`（`#/service` 那一页的命令行版）。
+
+### 6.1 脚手架与护栏（`scripts/` 里那几个「给加功能的人用」的东西）
+
+| 东西 | 干什么 | 谁在守它 |
+|---|---|---|
+| `src/features/_template/` | 一份可照抄的最小模块（也是生成器的输入）；README 里有「演示值 → 你的值」的完整替换表 | `scripts/tests/module-contract.test.mjs`（模板自己也得是合法形状） |
+| `scripts/new-feature.mjs` | 一条命令建模块 + 注册 + 补图标白名单 + 按需的后端与配置；**先规划后落盘**，任何一处不成立就整体不动 | 它自己的前置检查（锚点 / id / 路由 / 图标名 / SFC 解析） |
+| `scripts/lib/feature-scan.mjs` | 文本级扫描 `src/features/`：模块字段、路由、图标白名单、注册表 | —— 被上面两个共用，保证「生成器认为合法的」和「测试认为合法的」是同一套判据 |
+| `scripts/tests/module-contract.test.mjs` | 注册表契约：模块必须被注册、图标必须在白名单且两处一致、路由唯一且懒加载、`visible()` 的配置项真实存在 | `npm test` / CI |
+| `scripts/tests/config-whitelist.test.mjs` | 配置白名单三方对账：`DEFAULTS` ↔ 两张白名单 ↔ `config.example.json` | `npm test` / CI |
+| `.github/workflows/ci.yml` | ubuntu + windows 双平台：`npm ci` → `typecheck` → `test` → `parity` → `build` | GitHub Actions |
 
 验收细节见 [verifying.md](verifying.md)。
 
@@ -193,23 +220,23 @@ node 路径从 `WS_NODE` 或 PATH 找）、`pguard-smoke.mjs`（判定基线）�
 
 | 原来是什么 | 为什么不带 | 想加回来怎么做 |
 |---|---|---|
-| **教务（课表 / 成绩 / 签到 / 考勤）**：一个教务模块（`CampusMonitor` / `ApiConsole` / `PaperTodoService` 等 5 个页面 + 6000 余行）+ 校方 FastAPI 客户端 + 自动签到 + 节点管理面。三条依赖全是私有的：① 某校教务接口的 66 个端点（要学号密码与专有 Key）；② 本机一个桌面程序的 MCP 与插件快照；③ 微信 H5 签到的 `openId` | 隐私（别人的学号密码不该进开源仓库）与合规（代替本人完成考勤、涉及定位与身份冒用）—— 是**取舍**，不是没做完 | 写一个 `server/lib/<你的教务>.mjs` 当客户端 + 一组 `/api/*` 路由 + 一个前端模块（三步法）。`#/dev-guide` 的三步模板就是给这件事用的。**注意别提交任何凭据**（见 [CONFIG.md §8](CONFIG.md)） |
-| **网络认证保活（校园网）**：整套实现 + 硬编码的门户地址、AES 密钥、`wlanacname`/`paip`/`vlan` 模板，以及「本机是网线那条、Wi-Fi 是另一条出口」这类只对一台机器成立的拓扑结论 | 对一个陌生人不只是无用，是**误导**（照抄参数会指向一个不存在的门户） | 真正值得留的是方法论，不是实现：**「只补登不登出」**与**「判定只认门户只读接口、不信探测」**这两条已经写进 [ARCHITECTURE.md §7](ARCHITECTURE.md) 当设计教训。代码要自己重写（门户地址、加密参数都得你实测） |
+| **校方系统（课表 / 成绩 / 签到 / 考勤）**：曾有一个校内系统模块（多个页面 + 校方接口客户端 + 自动签到），依赖某校的私有接口（要身份凭据与专有 Key）与第三方 H5 签到 | 隐私与合规取舍（别人的身份凭据不该进开源仓库；代替本人完成考勤涉及定位与身份冒用）—— 未随仓库分发 | 写一个 `server/lib/<你的校方客户端>.mjs` 当客户端 + 一组 `/api/*` 路由 + 一个前端模块（三步法）。`#/dev-guide` 的三步模板就是给这件事用的。**注意别提交任何凭据**（见 [CONFIG.md §8](CONFIG.md)） |
+| **链路认证保活**：整套实现 + 硬编码的门户地址、加密密钥与认证参数模板，以及只对一台机器成立的网卡 / 出口拓扑结论 | 对一个陌生人不只是无用，是**误导**（照抄参数会指向一个不存在的门户） | 真正值得留的是方法论，不是实现：**「只补登不登出」**与**「判定只认门户只读接口、不信探测」**这两条已经写进 [ARCHITECTURE.md §7](ARCHITECTURE.md) 当设计教训。代码要自己重写（门户地址、加密参数都得你实测） |
 | **账号池自动化**：一整套对某商业服务的多账号轮转刷分（六类排程任务、realm 路由绕过、防限流节流） | 它依赖一个未随项目分发的第三方网关，且把「商业服务的账号池运维」做成了产品 —— 开源等于把服务条款风险与凭据管理责任一起转给下游 | **不建议加回来。** 若只想要「用量看板」这个形态，现在的「模型用量」页（`src/features/office/usage.module.ts`）已经是那个形态、且只读、够用 |
-| **网盘 / 云盘实现**：播放器 + 上传下载 + 目录别名（「电脑→手机」等私人约定），建在该网盘的**逆向私有接口**上（要网页 cookie，字幕那条还要客户端注入的原生签名函数） | 逆向接口随版本失效；要把个人账号登录态交给工具；别名目录是作者私人约定 | 接口位已经留好：见 [文件传输.md](文件传输.md)。接 WebDAV / S3 / rclone，**上传下载都做成「起任务 + 轮询」**（照 `memo.mjs` 的任务模型），凭据放 `credentials.json` |
-| **两层网关里的云那一层**：本机网关 + 云端 uniCloud 云对象，两层共同构成一条链路；仓库里只有本机那一半，且配置里带着真实渠道密钥 | 陌生人拿到手只能看到一半架构 —— 那比不给更糟 | 要这个分层就自己搭两层；`cloud-sync` / `gateway` 类实现**没有带**。若只想接一个上游，直接用 `server/lib/net.mjs` 的 `request()` 写个薄客户端 |
+| **云盘实现**：播放器 + 上传下载 + 目录别名 | 建在某个云盘的私有接口上 —— **不带任何依赖第三方客户端私有接口 / 逆向的能力**：换个版本就失效，还要把个人账号登录态交给工具 | 接口位已经留好：见 [文件传输.md](文件传输.md)。接 WebDAV / S3 / rclone，**上传下载都做成「起任务 + 轮询」**（照 `memo.mjs` 的任务模型），凭据放 `credentials.json` |
+| **两层网关里的云那一层**：本机网关 + 云端那半层，两层共同构成一条链路；仓库里只有本机那一半，且配置里带着真实渠道密钥 | 陌生人拿到手只能看到一半架构 —— 那比不给更糟 | 要这个分层就自己搭两层；那类实现**没有带**。若只想接一个上游，直接用 `server/lib/net.mjs` 的 `request()` 写个薄客户端 |
 | **个人画像**：一份可读写的个人档案页，装的是作者的三年主线、停止项与时间线 | 那是**私人人生规划的文本**，不是可复用的功能；抽掉数据后页面几乎是空壳（278 行） | 想要「一个可读写的档案页」，用「语音随记」的 records 或看板的记录做另一种视图即可；**数据侧不要任何种子** |
 | **看板的四类数据卡**（课表 / 待办 / 签到 / 早报正文），以及解析某个私人定时任务目录的实现 | 数据源逐条都是上面那些被删模块；砍完只剩空壳 | **骨架与存储留着**（`dashboard.json` 的加固写入 + AI 总结卡 + `summaries.mjs` 的按天存档）。加自己的卡：后端在 `/api/overview` 的返回里加一节（或另开 `/api/*`），前端在 `DashboardHome.vue` 里加一个 `<div class="ws-card block">` —— 写法照现有卡片抄 |
-| **对第三方客户端做逆向的本机转写链路**（某个输入法的 ASR 逆向客户端 + 附带转写日志） | 依赖一个不随仓库分发的私有工具目录，换个版本就失效，还要求使用者装一整套别人的工具 | **任务模型留着**（`memo.mjs` 的 jobs 状态机是通用的：录音 → 起任务 → 轮询进度 → 落成记录）。转写后端换成了标准 provider 接口，出厂只带 OpenAI 兼容 `/whisper` 一个实现（`server/lib/asr.mjs`）—— 自己填端点就行 |
+| **对第三方客户端做逆向的本机转写链路** | 不带任何依赖第三方客户端私有接口 / 逆向的能力：依赖一个不随仓库分发的私有工具目录，换个版本就失效 | **任务模型留着**（`memo.mjs` 的 jobs 状态机是通用的：录音 → 起任务 → 轮询进度 → 落成记录）。转写后端换成了标准 provider 接口，出厂只带 OpenAI 兼容 `/whisper` 一个实现（`server/lib/asr.mjs`）—— 自己填端点就行 |
 | **X（Twitter）正文抓取的三个非官方镜像 provider** | 靠第三方镜像取正文，可用性与合规性都不稳定；那段逻辑自己都注明「不抓图床、只保留链接」= 本来就是打折的通道 | **通用管道留着**：抓链接 → `raw/sources/*.md` + URL 去重 + 只增不覆盖（`wiki-fetch.mjs` 现在支持 RSS/Atom 与普通网页正文提取）。要接别的来源，按现有的两分支加一条 |
-| **对某个第三方 C# / WinUI 3 进程守护工具的接入层**（调它的 exe、读它的 `%APPDATA%` 配置与 `actions.jsonl`） | 原作者的取舍：那个工具没有无界面模式、常驻约 122 MB，已被自研引擎取代；**回滚材料是给作者自己的，不是给陌生人的** | 不需要 —— 自研引擎（`pguard.mjs` + `procs.mjs` + `procscan.mjs`）已经是完整替代，规则语义照那份工具重写过。若要接别的守护工具，照 `procscan.mjs` 的「快照 → 保护层 → 动作 + 审计」结构写 |
-| **一批内部决策文档**（架构评估、需求确认、整合方案、教务接口管控、看板方案、重构调研等 8 篇，约 240 KB） | 全是作者的决策记录与自评：写满了本机绝对路径、被删功能的取舍；且多篇开头就挂着「已被现状推翻」。对外部读者是噪音 | 面向陌生人的三篇已重写：[ARCHITECTURE.md](ARCHITECTURE.md) / [CONFIG.md](CONFIG.md) / [FEATURES.md](FEATURES.md)，加原有的 [design-system.md](design-system.md) / [校历格式.md](校历格式.md) / [每日一句导入.md](每日一句导入.md) / [文件传输.md](文件传输.md) / [verifying.md](verifying.md) |
-| **运行日志与验收产物**（`logs/`，25 MB / 168 个文件，其中 161 个不是 `.log`：界面截图、一次性排障脚本、已删页面的备份） | 截图里能看到学号、课表、成绩、余额 | `.gitignore` 从 `*.log` 扩成整目录 `logs/`。要保留示例图就挑 2–3 张**脱敏后**放 `docs/screenshots/` |
-| **AI 助手的工作目录残留**（会话记忆、校方接口探测脚本、20+ 张含学号与成绩的截图、一个验收 skill） | 对项目本身零价值 | 整目录删除并已进 `.gitignore`。其中唯一有复用价值的是那份**验收清单**，已脱敏改写成 [verifying.md](verifying.md) |
-| **个人操作残留与来源不明的第三方数据**（网盘 CLI 登录标记、本机选课任务 sqlite、个人词单文本、一份第三方整理的考研院校数据） | 前三个是个人残留；第四个**来源授权不明** —— 别人的整理成果不能随代码一起开源 | 全部删除，`.gitignore` 补上对应条目。考研院校数据若要保留，**先去确认授权**并单列 `LICENSE`/`DATA-LICENSE`，否则换成自采的少量示例 |
+| **某个第三方进程守护工具的接入层**（调它的 exe、读它的配置与审计） | 那个工具没有无界面模式，已被自研引擎取代；**它的源码与回滚材料不随本仓库分发** | 不需要 —— 自研引擎（`pguard.mjs` + `procs.mjs` + `procscan.mjs`）已经是完整替代。若要接别的守护工具，照 `procscan.mjs` 的「快照 → 保护层 → 动作 + 审计」结构写 |
+| **一批内部决策文档**（架构评估、需求确认、整合方案、校方接口管控、看板方案、重构调研等 8 篇，约 240 KB） | 全是作者的决策记录与自评：写满了本机绝对路径、被删功能的取舍；且多篇开头就挂着「已被现状推翻」。对外部读者是噪音 | 面向陌生人的三篇已重写：[ARCHITECTURE.md](ARCHITECTURE.md) / [CONFIG.md](CONFIG.md) / [FEATURES.md](FEATURES.md)，加原有的 [design-system.md](design-system.md) / [校历格式.md](校历格式.md) / [每日一句导入.md](每日一句导入.md) / [文件传输.md](文件传输.md) / [verifying.md](verifying.md) |
+| **运行日志与验收产物**（`logs/`） | 截图里含个人身份与院校数据，故整目录忽略 | `.gitignore` 从 `*.log` 扩成整目录 `logs/`。要保留示例图就挑 2–3 张**脱敏后**放 `docs/screenshots/` |
+| **AI 助手的工作目录残留**（会话记忆、探测脚本、含个人信息的截图、一个验收 skill） | 对项目本身零价值 | 整目录删除并已进 `.gitignore`。其中唯一有复用价值的是那份**验收清单**，已脱敏改写成 [verifying.md](verifying.md) |
+| **个人操作残留与来源不明的第三方数据**（云盘 CLI 登录标记、本机选课任务 sqlite、个人词单文本、一份第三方整理的考研院校数据） | 前三个是个人残留；第四个**来源授权不明** —— 别人的整理成果不能随代码一起开源 | 全部删除，`.gitignore` 补上对应条目。考研院校数据若要保留，**先去确认授权**并单列 `LICENSE`/`DATA-LICENSE`，否则换成自采的少量示例 |
 | **版权教材内容**（某考研英语课程 418 KB 的句库 + 解析出来的 markdown + 12 份原始 PDF） | 商业课程材料（考点原文 + 解析），**不是**可以随代码开源的内容 | 数据结构与进度逻辑留着（`english-daily.mjs`），转换器留着（`scripts/english-daily-parse.mjs` / `english-daily-build.mjs`）。**自己买课后**按 [每日一句导入.md](每日一句导入.md) 把原始文件放进 `raw/` 再跑解析 |
 | **个人数据目录整体**（看板记录、词单与学情、向量索引、聊天记录、录音、转写、审计、每日快照…） | 全是个人数据；其中还包含一个完整的浏览器 profile 与私人录音 | 不进版本库（`.gitignore` 忽略 `server/data/*`，只放行 7 个示例文件）。`server/lib/jsonstore.mjs` 能处理「文件不存在」，所以首启就是空态 |
-| **依附于已删模块的脚本**（注册每日签到的计划任务、截图验收、品牌图生成、随记导出测试、要真实词单的 API 测试） | 依附于被删的签到与截图工作流，或需要作者本机的 node 安装位与真实数据 | 随对应模块删除。留下的三个是有意义的基线：`parser-parity.mjs`（对拍）、`pguard-smoke.mjs`（判定）、`scripts/tests/*.test.mjs`（`node:test`） |
+| **依附于已删模块的脚本**（注册每日签到的计划任务、截图验收、品牌图生成、随记导出测试、要真实词单的 API 测试） | 依附于被删的签到与截图工作流，或需要作者机器的 node 安装位与真实数据 | 随对应模块删除。留下的三个是有意义的基线：`parser-parity.mjs`（对拍）、`pguard-smoke.mjs`（判定）、`scripts/tests/*.test.mjs`（`node:test`） |
 
 ### 7.2 泛化过的（把个人值换成了配置项）
 
@@ -218,11 +245,11 @@ node 路径从 `WS_NODE` 或 PATH 找）、`pguard-smoke.mjs`（判定基线）�
 | 原来 | 现在 | 还有残留吗 |
 |---|---|---|
 | 主目录硬编码成某个用户名 | `os.homedir()`（`config.mjs:58`），并统一成正斜杠 | 无 |
-| 5 处个人绝对路径当默认值（教务目录、早报目录、网关目录、守护目录、知识库目录） | 全部改空串；首启给 `server/config.example.json`；**「没配 = 不显示」**由 `visible()` 承担 | 无（`DEFAULTS` 里已无个人路径） |
+| 5 处个人绝对路径当默认值（校方接口目录、简报目录、网关目录、守护目录、知识库目录） | 全部改空串；首启给 `server/config.example.json`；**「没配 = 不显示」**由 `visible()` 承担 | 无（`DEFAULTS` 里已无个人路径） |
 | `dataDir` 写死绝对数据目录 | `path.join(SERVER_DIR,'data')`；`config.mjs` 导出 `dataDir()` 当唯一入口 | ⚠️ 部分模块没走 `dataDir()`，见 [ARCHITECTURE.md §6.4](ARCHITECTURE.md) |
-| 系统提示词里写死「某校某专业某学号」 | 抽成 `ai.persona`（中性默认「服务对象是一名在校大学生」）+ 可选的 `ai.personaPrivate`（落 `credentials.json`）；提示词模板里不再有身份字面量 | 无 |
-| 从作者本机的 AI 客户端配置里挖 `sk-` 与 baseURL | **删掉这条通道**。密钥走 `config.json` 的 `llm.keys`（值在 `credentials.json`），baseUrl 走 `newapi.baseUrl` | 无（`wiki-llm.mjs:126,258,348` 的注释曾写「从那个配置读」与实际不符 —— 本轮已改成实际来源） |
-| 从已退役的桌面端配置里迁 MinerU 令牌 | 删掉跨应用读取，只认 `docparse.mineru.token` | 无 |
+| 系统提示词里写死过一段**身份类字面量**（学号、姓名、学校等） | 抽成 `ai.persona`（中性默认「服务对象是一名在校大学生」）+ 可选的 `ai.personaPrivate`（落 `credentials.json`）；提示词模板里不再有身份字面量 | 无 |
+| 从作者机器的 AI 客户端配置里挖 `sk-` 与 baseURL | **删掉这条通道**。密钥走 `config.json` 的 `llm.keys`（值在 `credentials.json`），baseUrl 走 `newapi.baseUrl` | 无（`wiki-llm.mjs:126,258,348` 的注释曾写「从那个配置读」与实际不符 —— 本轮已改成实际来源） |
+| 从另一个应用的配置里迁 MinerU 令牌 | 删掉跨应用读取，只认 `docparse.mineru.token` | 无 |
 | LibreOffice / Python 的绝对路径 | `docparse.tools.{pandoc,soffice,python,pdftotext}`；留空先 `where`/`which` 扫 PATH，再回落常见安装位；缺工具时**点名**缺哪个、怎么装 | ⚠️ 这四个字段设置页能填但服务端白名单不放行（[CONFIG.md §3.8](CONFIG.md)） |
 | 转写工具的目录写死（一处是常量、一处读配置，两处指向同一个私有工具目录） | 那整条逆向链路已整体移除；转写后端换成标准 provider —— 只需要 `asr.baseUrl`（`server/lib/asr.mjs`），为空时**模块从侧边栏隐藏**。当前代码里**没有** `asr.dir` 这个配置项 | 无 |
 | 某个虚拟声卡设备名与 CLI 路径写死（两处不一致） | 两者连同整条本机采集链路一起移除；语音随记现在只接受**拖入 / 选择的音频文件**（`MemoView.vue:448`，页面不做浏览器内录音），因此不依赖特定声卡与特定 CLI。当前代码里没有任何 `captureDevice` / 某个声卡工具的 CLI 名 之类的字段 | 无 |
@@ -232,10 +259,10 @@ node 路径从 `WS_NODE` 或 PATH 找）、`pguard-smoke.mjs`（判定基线）�
 | 校历的内置 SEED 装着一所学校的校历 | SEED 清空成 `{version:1, school:'', semesters:[]}`；**算法全留**（教学周现算、假期不排课、调休）；示例数据换成「示例大学」并说明字段语义 | 无（示例数据是有意留的，`school` 字段写明是示例） |
 | 规划台种子写死个人项目清单与考试日期、来源指向一份私人复盘文件 | `seed()` 改成空结构；`source` 变成通用的「这条是哪来的」自由文本字段，由使用者填 | 无 |
 | 词单内置「某天复习的词」、id 带日期 | 换成 30 个**自写释义例句**的通用高频词（无版权顾虑）；`BUILTIN_ID = 'builtin-sample'` 不再带日期 | 无 |
-| 单词训练计划默认写死「大三 / 四级 + 考研 / 某段个人描述」 | 默认改成空 profile（`grade:''`、`exams:[]`、`note:''`） | 无 |
+| 单词训练计划默认写死「年级 / 目标考试 / 备注」 | 默认改成空 profile（`grade:''`、`exams:[]`、`note:''`） | 无 |
 | 前端写死 `SIDECAR_URL = 'http://127.0.0.1:5278'` | 改成构建期 `VITE_SIDECAR_URL ?? ''`，空则同源相对路径；保留 `?sidecar=host:port` 与 `localStorage` 覆盖与 `/api/auth/token` 引导 | 无 |
-| 设置页占位符用作者本机路径当示例 | 换成中性示例（`C:\资料\我的知识库`、`http://127.0.0.1:7890`、`https://your-endpoint.example.com`、`whisper-1`…） | 无 |
-| 本机网关的目录回落 | 网关整块移除；`gateway`/`cloud-sync` 不再存在 | 无（`grep` 无命中） |
+| 设置页占位符用作者机器路径当示例 | 换成中性示例（`C:\资料\我的知识库`、`http://127.0.0.1:7890`、`https://your-endpoint.example.com`、`whisper-1`…） | 无 |
+| 本机网关的目录回落 | 网关整块移除（含它的云同步那半） | 无（`grep` 无命中） |
 | 非官方镜像抓 X 正文 | 三个 provider 摘掉，只留通用管道（RSS/Atom + 正文提取） | 无 |
 | 边车顶部一堆指向私有服务的 `import` | 已清到只剩保留模块（`server/index.mjs:13-38`） | 无 |
 
@@ -286,15 +313,15 @@ node 路径从 `WS_NODE` 或 PATH 找）、`pguard-smoke.mjs`（判定基线）�
 
 | 缺什么 | 为什么该有 | 成本 |
 |---|---|---|
-| **LICENSE** | 仓库里没有 `LICENSE` / `CONTRIBUTING`。这会连带决定下游能不能商用 | 低。零依赖（只用 `node:` 内置）意味着没有第三方许可传染问题，选 MIT / Apache-2.0 都自由 |
+| ~~**LICENSE**~~ | **已补（2026-09-27）**：仓库根的 `LICENSE`（MIT）+ `THIRD-PARTY-NOTICES.md`（第三方来源与许可清单）。`CONTRIBUTING` 仍未单列 | 完成 |
 | **`server/credentials.example.json`** | 字段清单其实在 `SECRET_PATHS`（`config.mjs:38-55`）里已经写全了，照它生成一份空值模板即可 | 极低 |
-| **`engines` / `.nvmrc`** | README 写「Node 22+」，`package.json` 没有强制；而 `npm run test:parity` 用了 `node --experimental-strip-types`，是有版本门槛的 | 极低 |
-| **CI** | 没有任何 workflow。最小可用的一条：`npm ci` → `npm run typecheck` → `npm test` → `npm run build` | 低 |
-| **测试** | 现在只有 14 个断言（校历 + 抓取纯函数 + 单实例匹配）。最该补的四块：`jsonstore` 的原子写/回退链/`rev` 冲突、`vocab` 的七种粘贴格式、`srs` 的 SM-2、`wiki` 的检索与 lint —— 全是纯函数或纯文件逻辑，`node:test` 直接跑 | 中 |
+| ~~**`engines` / `.nvmrc`**~~ | **已补（2026-09-27）**：`package.json` 的 `engines.node` = `>=22.6`（`test:parity` 的 `--experimental-strip-types` 门槛）+ 仓库根 `.nvmrc`。注意 `engines` 只是建议，真正的门禁是 CI 锁 `node-version: '22'` | 完成 |
+| ~~**CI**~~ | **已补（2026-09-27）**：`.github/workflows/ci.yml`，ubuntu + windows 双平台跑 `npm ci` → `typecheck` → `test` → `parity` → `build` | 完成 |
+| **测试** | **现状（2026-09-27）：4 个文件、36 个用例** —— 校历 + 抓取纯函数（`core.test.mjs`）、单实例匹配（`singleton.test.mjs`）、配置白名单三方对账（`config-whitelist.test.mjs`）、注册表契约（`module-contract.test.mjs`）。接着最该补的四块：`jsonstore` 的原子写/回退链/`rev` 冲突、`vocab` 的七种粘贴格式、`srs` 的 SM-2、`wiki` 的检索与 lint —— 全是纯函数或纯文件逻辑，`node:test` 直接跑 | 中 |
 | **首启空态逐个验证** | `server/data/` 现在 100% 是「示例 + 空结构」，但**每个模块在无数据时是「空态引导」还是「崩」，没有逐个确认过** | 中 |
 | **面向陌生人的最小路径 README** | 现有 README 已经是这份口径（clone → `npm i` → 双击 → 看到哪些页、哪些是空的、怎么填），可继续补一份「外部工具装哪几个」的集中说明 | 低 |
 | **MCP 客户端接入样例** | 只有一段 Codex 的配置片段。应补 2–3 份可直接粘贴的（Claude Desktop / VSCode / 通用 stdio），并说明令牌怎么给（`/api/auth/token` 与 `X-WS-Token`） | 低 |
-| **品牌与字体资源授权** | `src/assets/brand/ws-logo.webp` 与 `src/assets/katex-fonts/*.woff2`（KaTeX 为 MIT，随包分发没问题）应在 `LICENSE` / `NOTICE` 里写明来源与许可 | 低 |
+| ~~**品牌与字体资源授权**~~ | **已写清（2026-09-27）**：见 `THIRD-PARTY-NOTICES.md` —— `src/assets/katex-fonts/*.woff2` 是 KaTeX 发行版自带的字体（上游 MIT，随包分发没问题），`src/assets/brand/ws-logo.webp` 为本项目自制、随本项目许可（MIT）分发 | 完成 |
 | **示例截图** | 要在 README 里展示界面，就先挑 2–3 张**脱敏后**的图放 `docs/screenshots/` | 低 |
 
 ---

@@ -9,7 +9,7 @@
  *   sentences.json —— 句库（静态），由 scripts/english-daily-parse.mjs / english-daily-build.mjs 编译；
  *   progress.json  —— 进度（指针 + 每日打卡记录），本模块维护。
  *
- * 展示规则（2026-09-26 与用户定稿）：
+ * 展示规则：
  *   指针【不自动】推进 —— 展示的永远是「第一个未完成的句子」；
  *   用户做完一次训练（写翻译 + 对照自评）才记一条当日记录，指针 +1；
  *   没做就停留。每天做没做，按本地日期记在 records 里。
@@ -200,7 +200,7 @@ function latestByDay(prog) {
   return byDay
 }
 
-/** 句子库：105 天的摘要 + 完成/自评状态（句子库页） */
+/** 句子库：句库全景（Day 1 到材料最后一天）的摘要 + 完成/自评状态（句子库页） */
 export function library() {
   const lib = loadLibrary()
   if (!lib.ok) return { ok: false, error: lib.error }

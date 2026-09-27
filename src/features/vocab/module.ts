@@ -1,11 +1,8 @@
 /**
- * 英语学习功能模块定义（原「背单词」，2026-09-26 扩成英语学习）。
- * 首页路径 /vocab（单词总览）；子页面：
- *   每日一句 / 句子库（句库要自己导入，见 docs/每日一句导入.md）
- *   单词练习 / 词单管理 / 错题本 / 训练计划（单词部分，数据在 server/data/vocab/）
+ * 英语学习：每日一句 + 单词两块（首页 `/vocab`，单词总览）。
  *
- * 侧边栏二级项的顺序 = routes 顺序：句子在前（每天都要过一遍），单词在后。
- * 模块首页仍指 /vocab（单词总览，词库统计那页）。
+ * 数据分两处：句子在 `server/data/english/daily-sentence/`，单词在 `server/data/vocab/`。
+ * 侧边栏二级项顺序 = `routes` 顺序：句子在前（每天都要过一遍），单词在后。
  */
 import type { WorkstationModule } from '@/core/types'
 import { useVocabStore } from './store'

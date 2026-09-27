@@ -32,7 +32,7 @@ export function getModule(id: string): WorkstationModule | undefined {
   return registry.get(id)
 }
 
-/** 不参与分组、固定在导航最上方的入口（如「服务与自启」这类本机工具） */
+/** 不参与分组、固定在导航最上方的入口（当前是「进程守护」与「运行与自启」这两个本机服务类页面） */
 export function getPinnedModules(): WorkstationModule[] {
   return getModules().filter((m) => !m.category)
 }

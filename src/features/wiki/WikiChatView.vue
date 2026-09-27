@@ -2,10 +2,10 @@
 /**
  * 知识库 · 问答（会话式流式）。
  *
- * 对应桌面端 Chat：多会话、逐字输出、依据列表、可中途停止；另外把「检索了什么」也显示出来 ——
- * 回答不可信时先看它翻了哪几页，比盯着答案猜有用。技能读库里的 .llm-wiki/skills/*.md。
+ * 多会话、逐字输出、依据列表、可中途停止；另外把「检索了什么」也显示出来 ——
+ * 回答不可信时先看它翻了哪几页，比盯着答案猜有用。技能读库内的技能目录（`.workstation-kb/skills/*.md`）。
  *
- * **模型可选**（2026-09-26 补）：接口一直支持 `model`，只是页面没给入口 —— 而「用哪个模型
+ * **模型可选**：接口一直支持 `model`，只是页面原先没给入口 —— 而「用哪个模型
  * 问这一句」是这页最常用的一档设置（便宜的够用就别上贵的）。清单取自工作台的 ai.models
  * （与每日看板的 AI 助手同一个来源），选「默认」= 不传 model，走「设置 → 模型」里 chat 预设。
  *
@@ -42,7 +42,7 @@ const streaming = ref(false)
 const skills = ref<any[]>([])
 const pickedSkills = ref<string[]>([])
 const deep = ref(true)
-/** 检索来源开关（对照桌面端 chat 的 tools 参数）：库内永远开；网络 / 本机文件按需开 */
+/** 检索来源开关：库内永远开；网络 / 本机文件按需开 */
 const toolsOn = ref({ web: false, anytxt: false })
 const topK = ref(6)
 const showAdv = ref(false)
@@ -368,7 +368,7 @@ onMounted(async () => {
           <el-checkbox-group v-model="pickedSkills" size="small" class="ch__skills">
             <el-checkbox v-for="k in skills" :key="k.id" :value="k.id" :title="k.preview">{{ k.name }}</el-checkbox>
           </el-checkbox-group>
-          <p class="wk-hint">来自库内 .llm-wiki/skills/*.md，勾选后拼进系统提示。</p>
+          <p class="wk-hint">来自库内 .workstation-kb/skills/*.md，勾选后拼进系统提示。</p>
         </section>
       </aside>
 

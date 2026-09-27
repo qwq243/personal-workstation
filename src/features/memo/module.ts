@@ -1,11 +1,6 @@
 /**
- * 语音随记（`#/memo`）。
- *
- * 命名沿用本站惯例：页面名用中文（语音随记），id / 文件名用英文领域名
- * （memo ↔ `server/lib/memo.mjs`、`/api/memo/*`、`#/memo`）。
- *
- * 为什么不叫「个人访谈」：用户的用法是「随手说一段、让它自己整理成一条记录」，
- * 访谈只是其中一种场景，随记更贴。
+ * 语音随记。
+ * 入口 `#/memo`（边车 `server/lib/memo.mjs` + `/api/memo/*`）。
  */
 import type { WorkstationModule } from '@/core/types'
 import { cfgFilled, cfgGet } from '@/core/appconfig'

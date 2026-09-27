@@ -1,9 +1,7 @@
 /**
  * pguard —— 工作台自带的进程守护引擎。
  *
- * 来历：前身是一个第三方的 C# / WinUI 3 小工具（规则引擎和界面在同一个进程里，
- * 没有无界面/服务模式，常驻约 122 MB）。它的**源码不随本仓库分发**，所以开源版里
- * 只剩下这个自研引擎 —— 规则是照它的语义重新实现的一份，见下面逐条说明：
+ * 本引擎是自研实现，规则语义见下（逐条）：
  *
  *   · 整机 CPU 过阈值要有**迟滞**：≥ triggerPercent 持续 triggerSustainSeconds 才「上膛」，
  *     ≤ releasePercent 持续 min(triggerSustainSeconds,10)s 才「撤膛」，中间那段保持现状（防抖）。
@@ -1180,7 +1178,7 @@ export function setPaused(on, reason = '') {
  *
  * 出厂是开的（dryRun 默认 true）。关掉之前请自己确认一件事：**同一台机器上不要再跑
  * 第二个做同样事情的守卫** —— 两个守卫各自动手一次会重复结束同一个进程。
- * 这条原来由代码里的互斥闸强制（那时本机还装着第三方工具），现在只剩文档约束。
+ * 这条只是文档约束，代码里不再有互斥闸。
  */
 export async function setDryRun(on) {
   const want = !!on

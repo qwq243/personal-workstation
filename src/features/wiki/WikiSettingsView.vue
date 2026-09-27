@@ -242,7 +242,7 @@ onMounted(load)
       <section class="wk-card">
         <h3 class="wk-card__title" style="margin-bottom: 8px"><el-icon><AlarmClock /></el-icon> 定时导入</h3>
         <p class="wk-card__desc">
-          按周期自动扫一遍监听目录、把新文件排进队列（对照桌面端的 scheduled-import）。
+          按周期自动扫一遍监听目录、把新文件排进队列。
           与「开启定时监听」共用同一个定时器：任一开启即生效，周期以这边为准。
         </p>
         <div class="st__row" style="margin-top: 0">

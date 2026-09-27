@@ -251,7 +251,7 @@ startServer()                                       :1184
 | 生产（无窗口） | 双击 `启动工作站.cmd` | 同上。`.cmd` 只做 `cd /d %~dp0` + 转发，**故意只写 ASCII**（cmd 按 OEM 代码页解析，中文会乱），中文提示交给 Node 打 |
 | 开发 | `npm run dev:all`（`scripts/dev-all.mjs`）/ `开发模式.cmd` | 边车（后台）+ Vite（前台），日志加前缀混流；任一子进程退出就整体收摊 |
 | 只起边车 | `npm run server` | `node server/index.mjs` |
-| 自启 | 启动文件夹里的 `工作站管家.lnk` | 见 §4.2 |
+| 自启 | 启动文件夹里的 `Workstation.lnk` | 见 §4.2 |
 
 `scripts/start.mjs` 与 `dev-all.mjs` 都是**纯相对路径**
 （`path.resolve(dirname(fileURLToPath(...)), '..')`），不写死任何机器的目录 —— 这是能开源的前提之一。
@@ -289,8 +289,8 @@ startServer()                                       :1184
 形态：**启动文件夹里放一条 `.lnk`，脚本本体在仓库 `scripts/` 下**。
 
 ```
-%APPDATA%\...\Startup\工作站管家.lnk      ← 指向 ↓（任务管理器「启动应用」显示的就是它）
-<仓库>\scripts\工作站管家.vbs              ← 由 panel.enable() 在运行时生成
+%APPDATA%\...\Startup\Workstation.lnk      ← 指向 ↓（任务管理器「启动应用」显示的就是它）
+<仓库>\scripts\Workstation.vbs              ← 由 panel.enable() 在运行时生成
    └─ wscript shell.Run("cmd.exe /c ""<node>"" ""<仓库>\server\index.mjs"" >> 日志 2>&1", 0, False)
 ```
 
@@ -314,15 +314,33 @@ startServer()                                       :1184
 检查引用的 exe 在不在、入口是不是**当前这份**、用的 node 是不是当前这个（`:79-173`）；
 分 `problems`（真起不来）与 `warnings`（现在能用但脆弱）两级。
 
-### 4.3 已知缺口：自启没有页面入口
+### 4.3 页面入口：`#/service`（运行与自启）
 
-边车侧 `/api/panel/status` 与 `/api/panel/autostart` 是活的（`server/index.mjs:360-378`），
-前端 `src/core/sidecar.ts:155-158` 也包好了两个方法 —— 但 **`src/` 里没有任何页面调用它们**
-（`grep -rn "panelStatus\|panelAutostart" src/` 只命中 `sidecar.ts` 自己）。
-也就是说：开源版把「服务与自启」那一页去掉了，于是**开机自启只能靠直接调接口开启
-（`POST /api/panel/autostart {"action":"enable"}`），页面上点不到**。
-多处注释仍以「服务与自启」举例（`src/core/registry.ts:35`、`src/core/types.ts:15`、
-`AppShell.vue:17,89`、`src/features/guard/module.ts:4-5`、`docs/design-system.md:45`），属文案残留。
+三条接口 + 一个页面，全在一个地方：
+
+| 层 | 位置 |
+|---|---|
+| 能力库 | `server/lib/panel.mjs`（`status()` 体检 / `enable()` / `disable()` / `remove()` / `sidecarStatus()`）· 编码与快捷方式在 `server/lib/autostart.mjs` |
+| 路由 | `GET /api/panel/sidecar`（当前进程）· `GET /api/panel/status`（自启位 + 体检）· `POST /api/panel/autostart`（`enable` / `disable` / `remove` / `open-startup`） |
+| 客户端 | `src/core/sidecar.ts` 的 `panelSidecar` / `panelStatus` / `panelAutostart` |
+| 页面 | `src/features/service/`（`module.ts` + `ServiceView.vue`），路由 `#/service`，**置顶区**（无 `category`） |
+
+「体检」是这一块的核心，分两级（`panel.status()`）：
+
+- **problems**（真会导致开机起不来）：`.vbs` 里引用的 exe 不存在、或没指向**当前这份**边车入口；
+- **warnings**（现在能用但脆弱）：用的 node 不是当前这个（某个工具自带的那个，随它升级会消失）。
+
+判据是**按 wscript 的解码口径把 `.vbs` 读出来、再实际 `existsSync`**，不是猜文件编码 ——
+`.vbs` 存成 GBK 也能正常工作，UTF-8 无 BOM 才是真坏的（见 4.2 第 1 条）。
+
+还有一个**刻意没做**的功能：页面上没有「重启边车」按钮。边车重启自己 = 先把自己杀掉，
+杀完那一刻没人接请求，页面只会转圈。要重启就跑 `npm run server` 或
+`scripts/restart-sidecar.py`（后者带 `.lnk` 修复与就绪轮询），这一页只管
+「下次开机还会不会自己起来」。
+
+2026-09-27 之前，这几条接口是**活的但没有页面调用**（`grep panelStatus src/` 只命中
+`sidecar.ts` 自己），所以自启只能靠 `curl` 或跑那个 `.py`，README 的命令清单里也没有它们；
+现在由 `#/service` 收口。`docs/FEATURES.md` 的「功能清单」与 `README.md` 的模块表都跟着更新了。
 
 ---
 
@@ -398,31 +416,50 @@ startServer()                                       :1184
 把它当「一键把数据挪到别的盘」会失望 —— 要挪就改 `config.json` 的 `dataDir`，
 并知道第四类那两份仍然留在仓库里。
 
-### 6.5 文档与代码的几处漂移（已核对；标「已修」的两条本轮修掉了，其余未修）
+### 6.5 文档与代码的几处漂移（已核对）
 
-| 位置 | 现象 |
-|---|---|
-| `server/config.example.json`（`dataDir` 一项） | 该项的值曾是一条**作者的绝对路径**（本机工作区下的 `server/data`），与本文件「全空默认」的声明、以及 `.gitignore` 的意图都冲突，属泄露本机路径。**已修**：整项从模板里删掉（只保留上面那条 `"// dataDir"` 说明键）—— 注意**不能填 `""`**，空串不是「用默认」，会让数据落到进程 cwd |
-| `server/index.mjs:633` ↔ `src/views/SettingsView.vue:187,467-473` | 设置页有「本机文档解析工具」四个输入框（`docparse.tools.*`）并会 PATCH 上去，但服务端白名单是 `docparse: ['mineru']` → 这四个字段**永远会被拒**，页面只会弹「已保存，但这些字段被拒绝：docparse.tools」 |
-| `src/features/office/CalendarView.vue:159,283` | 日历的**课表层恒为空**：它读 `overview.schedule.weekDays` / `overview.semester.week`，而 `grep -rn "schedule" server/*.mjs server/lib/*.mjs` **零命中**，`buildOverview()`（`index.mjs:179-196`）也不再返回这两个字段。于是每天都是「这一天没有课」，「停课 N 节」与「满课」图例永不出现；教学周仍能显示（走校历那条路，`:280-285` 的兜底是死代码）。模块描述里「看课表」是超范围的 |
-| `server/lib/wiki-llm.mjs:126,258,348` | 注释曾写「跟随工作台时交给 `newapi.aiProvider()`，它从作者本机 AI 客户端的 provider 取」—— 那条跨应用读取通道**已经删掉**，注释也已按实际来源改过：`config.json` 的 `llm.activePresetId` + `newapi.baseUrl`、`credentials.json` 的 `llm.keys`（`newapi.mjs:66-71`） |
-| 多个模块注释 | `src/features/dashboard/module.ts:5`、`DashboardHome.vue:7`、`DashboardAI.vue:120`、`DashboardTrend.vue:107-108` 等仍在解释「课表 / 待办 / 早报为什么不在」，属有意保留的说明（告诉读者去哪自己接），读的时候当设计说明看，不是残留 bug |
-| `server/config.mjs:740-782` | 顶层全站配置会同步一份**只读镜像**到 `wiki.*`（`_mirror` 标记）。这是历史迁移的残留：文件里长期躺着两份值。**改配置改顶层**，`wiki.*` 那几节会在下次启动被覆盖 |
-| `docs/design-system.md:118` | 提到用 `scripts/shot-page.cjs` / `shot-dark.cjs` 截图验收 —— 这两个脚本已随截图工作流一起移除，现在验收看 [verifying.md](verifying.md) |
-| `src/views/DevGuideView.vue:111` | 写着「Element Plus 已全量注册」—— 实际是 `unplugin-vue-components` 按需引入（`vite.config.ts`），main.ts 也不再 `app.use(ElementPlus)` |
-| 全仓 10 处引用小写的 `docs/architecture.md` | 本文档已落定为 **`docs/ARCHITECTURE.md`**（大写）。Windows 上大小写不敏感、照旧能打开；在 Linux/macOS 或 GitHub 网页上会 404。涉及 `docs/PRIVACY.md:157,209,589`、`docs/文件传输.md:67`、`scripts/seed-demo-data.mjs:169`、`server/config.example.json:129`、`server/lib/transfer/README.md:11`、`src/features/dashboard/DashboardAI.vue:120`、`src/features/dashboard/DashboardHome.vue:9`、`src/views/DevGuideView.vue:120`。逐条改成大写即可（本次只写文档，未改这些文件） |
+> **本表维护约定：位置只写「文件 + 小节 / 标题 / 一段能 grep 到的原文」，不写行号。**
+> 行号会被任何一次编辑弄漂 —— 上一版这张表就是因此把读者带偏的：它按行号点名了
+> `docs/PRIVACY.md` 的三处小写链接，而那三处**那时已经是大写了**。
+> 「状态」一栏只有两种值：**已修** / **未修**（未修的在下一节也会提一句）。
+
+| 位置 | 现象 | 状态 |
+|---|---|---|
+| `server/config.example.json` 的 `dataDir` 一项 | 该项的值曾写过一条**作者机器的绝对路径**（工作区下的 `server/data`），与本文件「全空默认」的声明、`.gitignore` 的意图都冲突。整项已从模板删掉，只留 `"// dataDir"` 说明键 —— 注意**不能填 `""`**：空串不是「用默认」，会让数据落到进程 cwd | **已修** |
+| `src/views/SettingsView.vue`（「本机文档解析工具」四个输入框）↔ `server/index.mjs` 的 `CONFIG_EDITABLE` | 页面把 `docparse.tools.{pandoc,soffice,python,pdftotext}` PATCH 上去，而白名单是 `docparse: ['mineru']` → 四个字段**永远会被拒**，页面只弹「已保存，但这些字段被拒绝：docparse.tools」。同类还有 `asr.*`（页面有转写后端那一栏，白名单里没有） | **未修**（见 [CONFIG.md](CONFIG.md) §4 与 §3.8） |
+| `src/features/office/CalendarView.vue`（课表层与教学周兜底） | **课表层恒为空**：它读 `overview.schedule.weekDays` / `overview.semester.week`，而 `grep -rn "schedule" server/*.mjs server/lib/*.mjs` 只命中 `scheduledImport`（配置项），`buildOverview()` 也不返回这两个字段。于是每天都是「这一天没有课」，「停课 N 节」「满课」图例永不出现；教学周仍正常（走校历那条路，`?? overview.schedule.week` 那段兜底是死代码）。模块描述里的「看课表」属超范围 | **未修**（要么接一个数据源，要么把它改成「校历视图」） |
+| `server/lib/wiki-llm.mjs` 的令牌来源说明 | 注释曾写「跟随工作台时交给 `newapi.aiProvider()`，它从另一个客户端的 provider 取」—— 那条跨应用读取通道**已经删掉**，注释已改成实际来源：`config.json` 的 `llm.activePresetId` + `newapi.baseUrl`、`credentials.json` 的 `llm.keys` | **已修** |
+| 看板模块的注释（`src/features/dashboard/module.ts`、`DashboardHome.vue`、`DashboardAI.vue`、`DashboardTrend.vue`） | 仍在解释「课表 / 待办 / 早报那几张卡的数据源为什么因人而异（各校接口 / 本机服务都不一样）」。这是**有意保留的设计说明**：告诉读者开源版只留骨架、卡怎么自己加。读的时候当设计说明看，不是残留 bug | 有意保留 |
+| `server/config.mjs` 的 `MIRROR_SECTIONS`（顶层 → `wiki.*` 的只读镜像） | 全站配置会同步一份带 `_mirror` 标记的副本到 `wiki.*`，文件里长期躺着两份值。这是历史迁移的残留。**改配置一律改顶层**，`wiki.*` 那几节会在下次启动被覆盖 | 未修（有意的向后兼容） |
+| `docs/design-system.md`（验收那一步） | 曾提到用两个已移除的截图脚本做验收 —— 那套截图工作流已随开源一起删掉；现在写的是「视觉改动自己截图看一眼」，验收方法指向 [verifying.md](verifying.md) | **已修** |
+| `src/views/DevGuideView.vue`（内核能力清单里的组件库那条） | 写着「Element Plus 已全量注册」—— 实际是 `unplugin-vue-components` 按需引入（`vite.config.ts` + `src/main.ts` 的注释），`main.ts` 里没有 `app.use(ElementPlus)` | **未修**（一句话的事，但改它要同时确认那一段的其它说法） |
+| 全仓引用小写的 `docs/architecture.md` | 本文档已落定为 **`docs/ARCHITECTURE.md`**（大写）。Windows 上大小写不敏感、照旧能打开；Linux/macOS 或 GitHub 网页上会 404。**当时实际剩 8 处**（`docs/文件传输.md`、`server/config.example.json`、`server/lib/transfer/README.md`、三个 `.vue` / `.mjs` 字符串字面量），逐条改成大写后全仓为 0 | **已修**（2026-09-27） |
+
+> ⚠️ 这张表**原来那版数错了**：它写「全仓 10 处」并点名 `docs/PRIVACY.md` 的三处小写链接，
+> 而那三处早就是大写 —— 原因是统计时用了 `grep -i`，把**已经正确的大写引用**也数了进去。
+> 结论：统计这类「同一名字的两种写法」时不要用 `-i`，也别把统计结果直接抄进表里。
 
 ### 6.6 工程面的缺口
 
-- **没有 `engines` 字段、没有 `.nvmrc`**。README 写「要求 Node 22+」，`package.json` 里没有强制。
-  实测本机 `node --version` = `v22.20.0`。
-- **没有 CI**（无 `.github/`），也**没有 LICENSE / CONTRIBUTING**。
-  好消息是「零依赖、只用 `node:` 内置」意味着没有第三方许可证传染问题，选许可很自由。
-- **测试面很窄**：`npm test` 目前只有 2 个文件、14 个断言，覆盖校历算法与抓取用的纯函数
-  （`scripts/tests/core.test.mjs`）、以及单实例闸的匹配规则（`scripts/tests/singleton.test.mjs`）。
+- ~~没有 `engines` / `.nvmrc`~~ **已补（2026-09-27）**：`package.json` 的 `engines.node` = `>=22.6`
+  （`test:parity` 用的 `--experimental-strip-types` 从 22.6 才有），仓库根也有 `.nvmrc`（`22`）。
+  注意 `engines` 默认只是**建议**（不加 `engine-strict` 不会拦安装），真正的门禁是 CI 锁 `node-version: '22'`。
+- ~~没有 CI~~ **已补（2026-09-27）**：`.github/workflows/ci.yml` 在 ubuntu + windows 两个平台跑
+  `npm ci` → `typecheck` → `npm test` → `parser-parity` → `build`。**刻意不跑** `test:pguard`
+  与 `npm run server`（前者要真机的 powershell 采样、结果随机器状态变；后者会常驻）；
+  也**不引入任何 linter / formatter**（见下一条）。
+  LICENSE 见仓库根 `LICENSE`（MIT），第三方来源见 `THIRD-PARTY-NOTICES.md`；
+  `CONTRIBUTING.md` 仍未单列 —— 那一段并进了 README 的「贡献 · 许可 · 从哪读起」，**不另开第三个事实源**。
+- **测试面仍然窄，但三条最脆的约定已经有护栏**：`npm test` 现在 4 个文件、36 个用例 ——
+  校历算法与抓取用的纯函数（`scripts/tests/core.test.mjs`）、单实例闸的匹配规则
+  （`scripts/tests/singleton.test.mjs`）、**配置白名单的三方对账**
+  （`scripts/tests/config-whitelist.test.mjs`：`DEFAULTS` ↔ 两张白名单 ↔ `config.example.json`）、
+  以及**注册表契约**（`scripts/tests/module-contract.test.mjs`：模块必须被注册、图标必须在
+  `src/main.ts` 的白名单里且两处一致、路由 path/name 唯一且懒加载、`visible()` 引用的配置项真实存在）。
+  后两个都是「漏了不报错、只表现为页面不对」的那类问题。
   零依赖边车天然适合 `node:test`，而 `jsonstore` 的原子写 / 回退链 / `rev` 冲突、
   `vocab` 的七种粘贴格式、`srs` 的 SM-2、`wiki` 的检索与 lint 都是纯函数或纯文件逻辑 ——
-  **最该先补测试的就是这四块**。
+  **最该接着补的还是这四块**。
 - **前端体积没有被盯住**：`vite.config.ts:57` 把 `chunkSizeWarningLimit` 提到 1600，
   于是 300 KB 级的 entry chunk 不再触发构建告警；边车的静态服务也**不做压缩**
   （`serveStatic` 只 `createReadStream(file).pipe(res)`，响应里没有 `Content-Encoding`）。
@@ -439,7 +476,7 @@ startServer()                                       :1184
 这几条比失去的那几千行代码值钱 —— 它们都是**在真机上跑出来的**，不是设计时的假设。
 （对应模块已不在仓库里；这里只留结论。）
 
-1. **只补登，不登出。** 做「网络认证保活」时，门户说「已认证」就一次登录请求都不要发 ——
+1. **只补登，不登出。** 做「链路认证保活」时，服务说「已认证」就一次登录请求都不要发 ——
    重新登录会把现有会话顶掉，等于自己把网断了。模块里刻意没有 `logoff` 调用。
    推广出去：**保活类逻辑的第一原则是「别动已经好的东西」**。
 2. **判定只认权威只读接口，不信探测。** 「通不通」这件事上，探测（ping / 204 端点）
@@ -447,8 +484,7 @@ startServer()                                       :1184
    能用设备/服务自己的只读状态接口判断，就别用探测结果推断。
 3. **「未注册路径」的报错形状是好用的探针。** 某些服务对未注册路径回「签名验证失败」、
    对已注册的给业务错误 —— 用这个差异能摸清一个私有接口有哪些能力，比逐个试参数省事，
-   也不会触发副作用。（如实记录：这条是前身项目在探测一个网盘接口时得出的经验；
-   涉及第三方服务时，先看它的条款。）
+   也不会触发副作用。（涉及第三方服务时，先看它的条款。）
 4. **多来源凭据要分清。** 同一个服务常有两套凭据（系统令牌 vs 用户 Key、
    open-api 令牌 vs 网页 cookie），混用会出现「元数据读到了、正文是空的」这类
    看起来像 bug 的现象。
@@ -468,14 +504,14 @@ startServer()                                       :1184
 
 ## 8. 不在这份架构里的东西
 
-- **文件传输**：仓库不带任何网盘实现。接口约定与一个空的 provider 目录见
+- **文件传输**：仓库不带任何云盘实现。接口约定与一个空的 provider 目录见
   [文件传输.md](文件传输.md)（WebDAV / S3 / rclone 都能接）。
-- **教务 / 签到 / 校园网认证**：依赖某所学校的私有接口与个人身份，整块没有带 ——
-  这是隐私与合规取舍，不是没做完。要接自己的学校，见 `src/views/DevGuideView.vue` 的三步模板。
+- **校内类能力（校方系统 / 签到 / 认证保活）**：依赖特定学校的私有接口与个人身份，整块没有带 ——
+  这是隐私与合规取舍，不是没做完。要接自己学校的接口，见 `src/views/DevGuideView.vue` 的三步模板。
 - **账号池 / 刷分自动化**：不做。把商业服务的多账号轮转与自动打卡做成产品，
   等于把服务条款风险与凭据管理责任一起转给使用者。
-- **云端那一层网关**：前身项目是「本机网关 + 云网关」两层，云端那层不在这个仓库里，
-  所以整块（`cloud-sync` / `gateway` 类实现）也没有带。
+- **云端那一层网关**：仓库只带「本机」这半层，云网关那半不在版本库里；陌生人拿到手
+  只能看到一半架构，所以整块没有带。
 - **对第三方客户端做逆向的本机工具链**：不做。需要转写就用标准的
   OpenAI 兼容 `/audio/transcriptions`（见 `server/lib/asr.mjs`）。
 - **跨应用读别人的私有配置**：不读。密钥一律只在 `server/credentials.json` 一处。

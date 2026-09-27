@@ -2,11 +2,11 @@
 /**
  * 规划台 —— 长期目标一屏看完：关键日期倒计时 + 项目推进 + 备考清单。
  *
- * 和「每日看板」的分工：看板管今天这一天（课表、待办、计划、复盘），
+ * 和「每日看板」的分工：看板管今天这一天（当天的计划 / 记录 / 心情 / 复盘 + AI 摘要卡），
  * 这里管这个学期要推进到哪：项目到几成、备考在哪个阶段、哪个截止快到了。
  *
  * 数据在服务端（server/data/plan.json），本页只是一个视图 —— 所以
- * 每日 03:00 的对话复盘把项目进度写进去之后，刷新一下就同步了。
+ * 外部脚本 / 智能体把项目进度写进去之后，刷新一下就同步了。
  */
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -566,7 +566,7 @@ function pctText(v: number) {
 
       <div class="foot ws-dim">
         数据存本机 <code>server/data/plan.json</code>（rev {{ panel.meta.rev }}，{{ savedAt }}）。
-        每日 03:00 的对话复盘会把它整理出的项目进度写进这里；MCP 的 get_plan / update_project / update_prep /
+        外部脚本 / 智能体把整理出来的项目进度写进这里；MCP 的 get_plan / update_project / update_prep /
         set_goal_date 读写的是同一份，所以面板和智能体永远看同一个数。带「推算」标记的日期是按历年惯例算的，官方一发通知就改掉它。
       </div>
     </template>
@@ -613,7 +613,7 @@ function pctText(v: number) {
     <el-dialog v-model="projDlg" :title="projForm.id ? '编辑项目' : '新增项目'" width="520px">
       <el-form label-width="82px" label-position="left">
         <el-form-item label="项目名">
-          <el-input v-model="projForm.name" placeholder="如：图书馆比赛" />
+          <el-input v-model="projForm.name" placeholder="如：读书会" />
         </el-form-item>
         <el-form-item label="优先级">
           <el-radio-group v-model="projForm.priority">

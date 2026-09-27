@@ -3,7 +3,7 @@
  * 「端口」标签页的内容（嵌在进程守护页里，所以不带自己的页头和离线占位）。
  *
  * 端口视图：谁在监听、占用者是哪个进程、能不能动它。
- * 「结束」先过工作台移植的它的保护层（server/lib/procscan.mjs），被拒的按钮禁用并写明原因；
+ * 「结束」先过工作台的保护层（server/lib/procscan.mjs），被拒的按钮禁用并写明原因；
  * 每次结束都写 data/procscan-actions.jsonl。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'

@@ -3,9 +3,9 @@
  * 「智能体」标签页的内容（嵌在进程守护页里）。
  *
  * 识别规则见 server/lib/procscan.mjs 的内置签名表，另加配置里的 procscan.agentExtras
- * （本机最常用的 ZCode 不在它那份名单里，不补这页就是空的）。
+ * （你自己常用的那个客户端若不在内置名单里，用 agentExtras 补一条，不补这页就是空的）。
  * 两个刻意的取舍：
- *   · 树**走到 shell 为止** —— 否则 ZCode 一个会话会把「半天里跑过的所有进程」都算进去（实测 174 个 / 5.6 GB）。
+ *   · 树**走到 shell 为止** —— 否则 GUI 型客户端一个会话会把「半天里跑过的所有进程」都算进去。
  *   · 「结束整个会话」逐个成员过保护层，被拒的成员写明原因；这个口子**不给智能体**（MCP 里没有）。
  */
 import { onMounted, onUnmounted, ref } from 'vue'
@@ -104,7 +104,7 @@ onUnmounted(() => {
       没有识别到在跑的智能体会话。<br />
       <span style="font-size: 12.5px">
         claude-code / codex / gemini-cli / cursor-agent / aider / opencode / crush / qwen-code / goose /
-        droid / amp / cline / copilot-cli，外加配置里的 agentExtras（本机已含 ZCode）
+        droid / amp / cline / copilot-cli，外加配置里的 agentExtras 补的客户端
       </span>
     </div>
 
@@ -156,7 +156,7 @@ onUnmounted(() => {
     </div>
 
     <p class="ws-dim" style="margin-top: 12px; font-size: 12.5px">
-      界面上的「结束」是**人点的动作**，所以不看演练开关（和它自己的规矩一致），但必须过保护层，且每次都写审计。
+      界面上的「结束」是<b>人点的动作</b>，所以不看演练开关（和它自己的规矩一致），但必须过保护层，且每次都写审计。
       这个能力不开放给 MCP —— 智能体拿不到结束进程的口子。
     </p>
   </div>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 英语每日一句 · 练习卡片（每日看板与「英语学习 → 每日一句」页共用）。
- * 规则（2026-09-26 定稿）：指针做完才走 —— 写翻译 → 核对 → 三档自评，走完才推到下一句；
+ * 规则：指针做完才走 —— 写翻译 → 核对 → 三档自评，走完才推到下一句；
  * 没做就停在当前句。每天做没做按日期记在边车 progress.json，卡片底部有最近 7 天的记号。
  * 词汇在翻译前就给（与纸上顺序一致：原句 → 词汇 → 你的翻译 → 参考答案）。
  */
@@ -19,7 +19,7 @@ const loading = ref(true)
 const translation = ref('')
 const checked = ref(false)
 const submitting = ref(false)
-/** 词汇默认收起（先自己读原句，需要提示再点开）—— 2026-09-26 用户定 */
+/** 词汇默认收起（先自己读原句，需要提示再点开） */
 const showVocab = ref(false)
 
 const RATING_LIST: { key: 'good' | 'half' | 'lost'; label: string }[] = [
@@ -80,7 +80,7 @@ load()
     <template v-else>
       <div class="ed-head">
         <span class="ed-day">Day {{ data.item.day }}</span>
-        <span v-if="data.item.source" class="ed-src">真题 {{ data.item.source }}</span>
+        <span v-if="data.item.source" class="ed-src">试卷 {{ data.item.source }}</span>
       </div>
       <p class="ed-text">{{ data.item.text }}</p>
 

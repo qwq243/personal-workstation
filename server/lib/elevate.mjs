@@ -12,7 +12,6 @@
  * 编码坑（务必按此写法）：Windows 中文环境下 PowerShell 读 .ps1 时，若文件是
  * UTF-8 **不带 BOM**，会按 ANSI/GBK 解码，脚本里的中文会变成乱码甚至导致语法错误。
  * 所以这里：① 统一加 UTF-8 BOM；② 生成脚本内的提示语只用 ASCII（双保险）。
- * （同样的教训见教务项目 scripts/windows 的说明。）
  */
 import fs from 'node:fs'
 import path from 'node:path'

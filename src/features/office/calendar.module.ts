@@ -1,9 +1,8 @@
 /**
- * 日历日程 —— 把「每周固定的课表」和「每天不同的计划 / 记录」放在同一张日历上看。
+ * 日历日程 —— 把「每周固定的课表」和「每天不同的计划 / 记录」放在同一张日历上看（入口 `#/office/calendar`）。
  *
- * 和「每日看板」分工：看板只看今天这一天；这里回答「这一周/这一月我的时间被什么占着」。
  * 数据全部来自边车（overview 给整周课表，dashboard/calendar 给每天的记录摘要），
- * 页面本身不存任何数据，改计划/记录直接写回 server/data/dashboard.json。
+ * 页面本身不存任何数据，改计划 / 记录直接写回 `server/data/dashboard.json`。
  */
 import type { WorkstationModule } from '@/core/types'
 

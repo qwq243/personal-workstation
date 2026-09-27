@@ -2,8 +2,8 @@
 /**
  * 进程守护（`#/process-guard`）—— 这一页就是**引擎的面板本体**。
  *
- * 引擎是工作台自带的（`server/lib/pguard.mjs`，规则照着前身那套第三方工具的语义重新实现）。
- * 那个第三方工具**源码不随本仓库分发**，所以接入层已经拿掉；这一页上每个数字都来自我们自己的引擎。
+ * 引擎是工作台自带的（`server/lib/pguard.mjs`，自研实现，规则语义见该模块头部说明）。
+ * 这一页上每个数字都来自我们自己的引擎。
  *
  * 五页：概览 / 进程 / 参数 / 名单 / 日志（另有端口 / 智能体两页，走 lib/procscan.mjs）。
  * 三条边界（页面上也写着，别当缺陷补）：
@@ -419,7 +419,7 @@ onUnmounted(() => {
               <div class="stat__v">{{ st.procCount ?? '—' }} <span class="stat__sub">/ {{ st.cpuCount ?? '—' }}</span></div>
               <div class="stat__d" style="margin-top: 10px">
                 引擎自己占 <b>{{ fmtBytes(st.selfWorkingSetBytes) }}</b>
-                <span class="ws-dim">（以前那套第三方工具光界面就常驻 122 MB，这份内存已经省下来了）</span>
+                <span class="ws-dim">（引擎内嵌在边车里，没有另装一个常驻客户端的开销）</span>
               </div>
             </div>
 

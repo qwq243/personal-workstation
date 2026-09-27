@@ -13,7 +13,7 @@
 |---|---|---|---|
 | `server/config.example.json` | 模板 + 每项说明（**程序不读它**） | 是 | 人写的 |
 | `server/config.json` | 你的实际配置：端口、目录、端点地址、白名单… | **否** | 首次运行自动生成 |
-| `server/credentials.json` | 敏感项：面板令牌、模型 API Key、云端令牌、身份补充 | **否** | 首次运行自动生成 |
+| `server/credentials.json` | 敏感项：面板令牌、模型 API Key、云端令牌、身份补充 | **否** | 第一次保存密钥时（`saveConfig()` 收到敏感项，或启动时从 `config.json` 迁移明文密钥）。**没配过密钥就一直不存在，属正常状态** |
 | `server/data/` | 看板、词单、向量、录音、审计、缓存、备份 | 否（只放行 7 个示例文件） | 运行时生成 |
 
 三者关系（`server/config.mjs:22-26`）：
@@ -134,12 +134,12 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 
 | 字段 | 默认 | 含义 |
 |---|---|---|
-| `workstation.autostartEntry` | `'工作站管家.lnk'` | 启动文件夹里那条自启项的**文件名**，也就是「任务管理器 → 启动应用」显示的名字 |
+| `workstation.autostartEntry` | `'Workstation.lnk'` | 启动文件夹里那条自启项的**文件名**，也就是「任务管理器 → 启动应用」显示的名字 |
 | `workstation.autostartLog` | `'logs/sidecar-autostart.log'` | 自启脚本的输出日志（追加）。相对 `ROOT_DIR` |
 | `startupDir` | 由 `os.homedir()` 推导：`<home>/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup` | 启动文件夹目录。**不硬编码用户名**（`config.mjs:57-60`） |
 
 ⚠️ **别把 `startupDir` 手工设成 `""`**。合并时空串会覆盖掉推导出来的默认值，
-`autostart.startupDir()` 返回 `''`，`path.join('', '工作站管家.lnk')` 就成了相对路径 ——
+`autostart.startupDir()` 返回 `''`，`path.join('', 'Workstation.lnk')` 就成了相对路径 ——
 自启位会写到进程 cwd 下。`server/config.example.json:36` 里恰好是 `""`，
 **照着它整份复制成 `config.json` 会踩这个坑**（那份模板程序不读，但人会抄）。
 
@@ -194,7 +194,7 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 | `llm.reasoning` | `'auto'` | `auto` = 让模型自己决定思考；`off` = 明确关掉（部分模型支持） |
 | `llm.maxContextSize` | `128000` | 上下文预算（字 / token 级的粗算，用于截断原始资料） |
 
-> 代码注释里曾经有「跟随工作台时读作者本机 AI 客户端 provider」的说法（`wiki-llm.mjs:126,258,348`）——
+> 代码注释里曾经有「跟随工作台时读作者机器 AI 客户端 provider」的说法（`wiki-llm.mjs:126,258,348`）——
 > 那条跨应用读取通道**已经删掉**，注释也已按实际来源改过：就是本节这两项（`newapi.mjs:66-71`）。
 
 #### `embedding`（语义检索的嵌入端点）
@@ -289,7 +289,9 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 
 改配置推荐走页面「设置与数据」：那里的写入是**白名单式**的 —— 一个手滑（或前端传了个多余字段）
 不会把边车自己的配置写坏（写坏之后连「打开设置页改回来」都做不到）。
-服务端放行清单在 `server/index.mjs:622-657`（`CONFIG_EDITABLE`）：
+服务端放行清单分**两张**（都在 `server/index.mjs`），按「这一项在 `config.json` 里的形状」分：
+
+**① `CONFIG_EDITABLE` —— 分节（值是对象）**，逐子字段放行：
 
 | 分节 | 放行的字段 |
 |---|---|
@@ -302,14 +304,26 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 | `search` | `provider` `apiKey` `serpApiEngine` `searXngUrl` `searXngCategories` `ollamaUrl` `providerConfigs` `defaultSource` `maxResults` `anyTxt` |
 | `docparse` | `mineru`（**没有 `tools`**，见 §3.8 的已知缺陷） |
 | `network` | `proxy` |
-| `outputLanguage` | （无子字段，整项可写） |
 | `wiki` | `dir` `model` `maxChars` `chatMaxTokens` `embedding` `mineru` `llm` `search` `output` `network` `scheduledImport` `watchEnabled` `watchAutoIngest` `watchIntervalMin` `watchMaxFileSizeMb` `watchDirs` `watchExcludeDirs` |
-| 顶层 `startupDir` | 单独放行（`:992-995`） |
 | **不在表里的** | `port`、`auth.*`、`dataDir`、`asr.*`、`procscan.*` —— **只能手工编辑 `config.json`** |
+
+**② `CONFIG_EDITABLE_SCALARS` —— 标量（值是字符串 / 数字 / 布尔）**，整项放行：
+
+| 顶层键 | 放行原因 |
+|---|---|
+| `startupDir` | 启动文件夹绝对路径（留空 = 自动取 `%APPDATA%` 下那个） |
+| `outputLanguage` | 输出语言单值下拉：`Chinese` / `English` / `auto`（设置页那一栏） |
+
+> 为什么标量要单列一张表：分节那条循环用 `typeof v !== 'object'` 判形状，标量会被当成
+> 「无效分节」直接拒掉。`outputLanguage` 曾经就是这么坏的 —— 页面发
+> `{"outputLanguage":"English"}`、服务端回 `{ok:false,error:'没有可改的字段（被拒绝：outputLanguage）'}`，
+> 而页面把 200 当成功。加新配置项时**两张表 + `DEFAULTS` 都要动**，
+> `scripts/tests/config-whitelist.test.mjs` 会替你查漏（见 §10）。
 
 被拒的字段不会让整个请求失败：响应里带 `rejected: ['docparse.tools']`，
 页面会提示「已保存，但这些字段被拒绝：…」。`GET /api/config` 同时返回
-`config`（脱敏副本）、`defaults`（设置页「恢复默认值」用）、`editable`、`path`。
+`config`（脱敏副本）、`defaults`（设置页「恢复默认值」用）、`editable`（分节那张表）、
+`editableScalars`（标量那张表，数组）、`path`。
 
 > ⚠️ `asr.*` 也不在 PATCH 白名单里，但设置页确实有转写后端那一栏并会 PATCH `asr`
 > （`src/views/SettingsView.vue:185`）—— 与 `docparse.tools` 同一类问题。
@@ -370,7 +384,7 @@ VITE_SIDECAR_URL=http://127.0.0.1:5278
 
 ```bash
 curl -s http://127.0.0.1:6000/api/health
-# 期望：{"ok":true,"service":"workstation-sidecar","version":"0.1.0","port":6000,...}
+# 期望：{"ok":true,"service":"workstation","version":"0.1.0","port":6000,...}
 ```
 
 `/api/health` 免令牌，所以这条 curl 不需要带 `X-WS-Token`。
@@ -442,10 +456,10 @@ curl -s "http://127.0.0.1:5278/api/vocab/audio?q=test&token=<token>"
 | `server/config.json` | 里面有**可用的边车访问令牌** `auth.token`，以及你这台机器的目录 | `server/config.json` |
 | `server/credentials.json` | 面板令牌、模型 API Key、MinerU 令牌、`personaPrivate` 身份信息 | `server/credentials.json` + 兜底 `**/*secret*.json` |
 | `server/data/**` | 看板记录、词单与学情、知识库向量与聊天、录音、转写、审计、缓存、每日快照 | `server/data/*`，只 `!` 放行 `.gitkeep` / `README.md` / `dashboard.json` / `plan.json` / `school-calendar.json` / `vocab/lists.json` / `vocab/progress.json` |
-| `logs/` | 运行日志；前身仓库在这里攒了 25 MB 日志与**含学号、课表、成绩的界面截图** | `logs/`（整目录；光靠 `*.log` 挡不住） |
-| `工作站管家.vbs` | 运行时产物，由 `panel.mjs` 按 `process.execPath` 生成，**根本不需要入库** | `工作站管家.vbs` |
+| `logs/` | 运行日志；截图里含个人身份与院校数据，故整目录忽略 | `logs/`（整目录；光靠 `*.log` 挡不住） |
+| `Workstation.vbs` | 运行时产物，由 `panel.mjs` 按 `process.execPath` 生成，**根本不需要入库** | `Workstation.vbs` |
 | `.env` / `.env.*` / `*.session` / `*.pem` / `*.key` / `cookies*` | 通用凭据与会话 | 对应五行 |
-| `.workbuddy/`、`.quarkclouddrive/`、`/data/`、`单词导入-*.txt` | AI 助手工作目录残留、网盘 CLI 登录标记、本机 sqlite、个人词单文本 | 对应的四行 |
+| `/data/` | 本机 sqlite（别的一次性脚本留下的库文件） | 对应的那一行 |
 | `node_modules/`、`dist/`、`dist-ssr/`、`.vite/`、`*.local` | 依赖与构建产物 | 对应五行 |
 
 ### 8.1 提交前自查
@@ -526,6 +540,43 @@ grep -rniE "sk-[a-z0-9]{16,}|C:\\\\Users|D:\\\\|/Users/" --include='*.json' --in
 
 即使写入的配置里把令牌设成空，`saveConfig()` 也会在最后补一个新令牌（`:633-636`）。
 想换令牌就照 §7.3 做；想彻底不要令牌就关 `auth.enabled`。
+
+---
+
+## 10. 加一项配置要改哪几处（以及漏了会怎样）
+
+配置项有**三处**，缺一处不会报错，只会在某个地方表现为「改不动」或「别人不知道有这一项」：
+
+| # | 改哪 | 作用 | 漏了的表现 |
+|---|---|---|---|
+| 1 | `server/config.mjs` 的 `DEFAULTS` | 这一项存在，且有出厂值 | 读到的永远是 `undefined`，模块按「没配」处理 |
+| 2 | `server/lib/config-editable.mjs` 的白名单 | 页面上改得动 | 页面 PATCH 被拒、`rejected` 里点名（**但页面把 HTTP 200 当成功**，所以看着像「保存了没生效」） |
+| 3 | `server/config.example.json` | 别人知道有这一项、怎么填 | 陌生人不知道有它 |
+
+第 2 处**分两张表**，判据是「这一项在 `config.json` 里是什么形状」：
+
+- 值是**对象**（一个分节）→ 加进 `CONFIG_EDITABLE` 的对应分节数组；
+- 值是**字符串 / 数字 / 布尔**（标量）→ 加进 `CONFIG_EDITABLE_SCALARS`。
+  标量项误放进 `CONFIG_EDITABLE`（尤其写成空数组）的后果就是**永远改不动** ——
+  分发处的分节循环用 `typeof v !== 'object'` 判形状，字符串一律被算成「无效分节」。
+  `outputLanguage` 就是真踩过的这一脚（2026-09-27 修）。
+
+如果这一项是**密钥**，还要在第 1 步之后加进 `SECRET_PATHS`（`server/config.mjs`），
+它会自动落到 `credentials.json`、响应里自动脱敏成 `****后四位`，详见 §2。
+
+### 10.1 有没有东西替我查漏
+
+有：`npm test` 里的 **`scripts/tests/config-whitelist.test.mjs`**（零依赖、不连网、不读真实数据），
+它做四件对账：
+
+1. `config.example.json` 去掉 `"//*"` 与 `_readme` 之后的每个顶层键，都必须能在 `DEFAULTS` 里找到
+   （反向不要求 —— 模板可以少写）；
+2. `CONFIG_EDITABLE` 的每个值必须是**非空数组**，里面的每个字段必须真在 `DEFAULTS` 的对应分节里存在
+   （放行一个不存在的字段会让 PATCH 把垃圾写进 `config.json`）；
+3. `CONFIG_EDITABLE_SCALARS` 的每一项都必须在 `DEFAULTS` 里**且确实是标量**；
+4. 两张表不重叠，且 `outputLanguage` / `startupDir` 这两个「页面发字符串下来」的键留在标量表里。
+
+所以加配置项的规矩可以简化成一句：**改完跑 `npm test`，红了就照它点名的位置补。**
 
 ---
 

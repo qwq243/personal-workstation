@@ -2,13 +2,14 @@
 
 **一句话**：一个跑在自己电脑上的个人工作台 —— Vue 3 页面 + 一个只监听 `127.0.0.1` 的本地边车（Node，只用内置模块），功能以「模块」为单位插拔。
 
-**一段话**：前端是「内核 + 功能模块」的结构。内核（`src/core/`、`src/router/`、`src/shell/`）负责路由、侧边栏、存储、主题与边车客户端；每个功能自己一个目录（`src/features/<名字>/`），通过 `module.ts` 向 `src/core/registry.ts` 登记自己（id / 名称 / 图标 / 路由 / 可选的可见性钩子）—— **侧边栏、首页卡片、路由表全部由这张注册表派生**，加一个功能不需要改内核任何一行。需要后端能力时（读写本地文件、调外部接口、存放不能丢的数据），在边车的 `server/lib/*.mjs` 里写能力、在 `server/index.mjs` 里挂一条 `/api/*`。边车存在的三个理由：绕开浏览器的 CORS、把密钥留在浏览器之外、做浏览器做不到的本机操作（扫进程、读端口、写启动项、起子进程）。它只监听回环地址，并且有两道闸：**Origin 白名单 + 本地令牌**。
+**一段话**：前端是「内核 + 功能模块」的结构。内核（`src/core/`、`src/router/`、`src/shell/`）负责路由、侧边栏、存储、主题与边车客户端；每个功能自己一个目录（`src/features/<名字>/`），通过 `module.ts`（一个目录装多个模块时用 `<id>.module.ts`）向 `src/core/registry.ts` 登记自己（id / 名称 / 图标 / 路由 / 可选的可见性钩子）—— **侧边栏、首页卡片、路由表全部由这张注册表派生**，所以加功能**不需要改 `src/core/`、`src/router/`、`src/shell/`**。但「不用改内核」不等于「一个文件都不用动」：新图标要在 `src/main.ts` 的白名单里加**两处**（import 与 `ICONS` 映射，漏了不报错、只表现成那块图标是空白），后端能力要在边车的 `server/lib/*.mjs` 里写、再在 `server/index.mjs` 里挂一条 `/api/*`。完整清单（纯页面 / +接口 / +配置 / +MCP 各动几个文件）见 [docs/EXTENDING.md §2](docs/EXTENDING.md)。边车存在的三个理由：绕开浏览器的 CORS、把密钥留在浏览器之外、做浏览器做不到的本机操作（扫进程、读端口、写启动项、起子进程）。它只监听回环地址，并且有两道闸：**Origin 白名单 + 本地令牌**。
 
 ---
 
 ## 核心特性
 
 - **一个扩展点**：`src/core/registry.ts`。`registerModule()` 之后，侧边栏分组、首页卡片、路由表自动生成（`getGroupedModules()` / `collectRoutes()`）。
+- **加功能有脚手架，还有护栏**：`node scripts/new-feature.mjs <id>` 一条命令建模块 + 注册 + 补图标白名单（+ `--api` 后端骨架、`--config` 配置三处）；骨架与替换表在 `src/features/_template/`。`npm test` 里的 `module-contract` / `config-whitelist` 两条会替你把「漏了不报错」的那几处（没注册、图标没进白名单、配置项漏挂）变成红色。
 - **边车零第三方依赖**：`server/` 下没有任何 `import` 指向 npm 包 —— 只有 `node:` 内置模块与相对路径。前端依赖也只有 Vue 3 / vue-router / pinia / Element Plus / KaTeX。
 - **访问控制不是可选项**：边车只监听回环，但浏览器里任何网页都能 `fetch('http://127.0.0.1:5278/...')`。所以有 `server/lib/auth.mjs` 的两道闸：Origin 白名单（非白名单来源 403）+ 本地令牌（`/api/*` 与 `/mcp` 要带 `X-WS-Token`，首次运行随机生成）。
 - **数据是加固写盘**：`server/lib/jsonstore.mjs` 给「不能丢」的 JSON 提供原子写、`.bak` 回退、每日快照、坏文件留证（`.corrupt-<时间>`）与 `rev` 乐观并发。
@@ -55,13 +56,59 @@
 
 ### 环境要求
 
-**Node.js**：仓库**没有**声明 `engines` 字段（也没有 `.nvmrc`），下面是实测口径：
+**Node.js**：`package.json` 声明了 `engines.node` = `>=22.6`，仓库根也有 `.nvmrc`（`22`）。
+下面是实测口径（本机 `node --version` = `v22.20.0`）：
 
-- `npm test`（`node --test`）在 **Node v22.20.0** 上跑通：14 个用例全过；
-- `npm run test:parity` 用了 `node --experimental-strip-types`（在 `.ts` 上直接跑类型剥离），**需要 Node ≥ 22.6**（脚本自己的注释写的是「Node 22 起支持」）；
-- 本次对 `server/`、`server/lib/`、`scripts/` 下共 44 个 `.mjs` 跑 `node --check`，全部通过。
+- `npm test`（`node --test`）跑通：4 个文件、36 个用例全过；
+- `npm run test:parity` 用了 `node --experimental-strip-types`（在 `.ts` 上直接跑类型剥离），**需要 Node ≥ 22.6**（脚本自己的注释写的是「Node 22 起支持」）—— `engines` 那条下限就是为它定的；
+- 对 `server/`、`server/lib/`、`scripts/` 下的 `.mjs` 逐个跑 `node --check`，全部通过。
 
-所以**建议 Node 22 LTS 及以上**；低于 22 时应用本身可能跑得起来，但 `test:parity` 会失败。
+> `engines` 默认只是**建议**（不配 `engine-strict` 时 npm 只警告不拦）；CI 那条 `node-version: '22'`
+> 才是真的门禁。低于 22.6 时应用本身可能跑得起来，但 `test:parity` 会失败。
+
+**操作系统：这是一个 Windows 工具**（页面与纯逻辑跨平台，本机能力不跨）。分开说清楚：
+
+| 能跨平台跑 | 只在 Windows 上可用 |
+|---|---|
+| 前端与内核：`npm run build` / `npm run dev` / `npm test` / `npm run test:parity` | **进程 / 端口 / 智能体三个视图**：硬调 `tasklist` / `netstat -ano` / `taskkill` / `powershell Get-CimInstance`（`server/lib/net.mjs`、`procs.mjs`、`procscan.mjs`） |
+| 边车里「不碰本机」的部分：看板、规划台、词单、校历、知识库读写与检索、MCP | **进程守护引擎**：Windows 工作集 / 待机列表那套（`server/lib/pguard.mjs`） |
+| | **开机自启**：启动文件夹 + `.lnk` + `wscript.exe` + UTF-16LE 的 `.vbs`（`server/lib/panel.mjs`、`autostart.mjs`、`src/features/service/`，以及 `scripts/*.py`） |
+| | **提权动作**（清系统待机列表）：`Start-Process -Verb RunAs` 弹 UAC（`server/lib/elevate.mjs`） |
+| | **文档解析回落通道**：pandoc / LibreOffice（`.com` 与 `.exe` 在 Windows 上不是一回事）/ pdftotext（`server/lib/wiki-parse.mjs`） |
+
+换到 Linux / macOS：页面能开、构建与测试能过，但上面右列那几块要先给这一层**加实现分派**
+（按 `process.platform` 分叉），目前**没有做**，文档里也不假装做了 —— 细节见
+[docs/ARCHITECTURE.md §6.2](docs/ARCHITECTURE.md)。
+
+### 拿到这份代码
+
+**请用 `git clone`**（或在 GitHub 上点 Download ZIP）—— 这样你拿到的是**版本库里的那份**，
+运行时状态一律不在里面：`dist/`、`node_modules/`、`server/config.json`、
+`server/credentials.json`、`server/data/` 里的个人数据、`logs/`、`scripts/Workstation.vbs`、`__pycache__/`。
+
+⚠️ **如果是别人「按文件夹拷一份」给你的**（而不是 clone），那份副本很可能带着**他的运行时状态**，
+先按下面清一遍再跑：
+
+```bash
+# 只列不删：看看除了版本库里的东西，还多带了什么
+git clean -xdn
+
+# 手动确认后要删的话（⚠️ 没有 -n 就是真删，且会连你未提交的新文件一起删）
+# git clean -xdf
+
+# 不想用 git 的话，按这个清单手动删：
+#   dist/                          —— 旧构建产物（npm run build 会重新生成）
+#   server/config.json             —— 他的端口、目录、**本地访问令牌**（含令牌就别外传）
+#   server/credentials.json        —— 他的模型 Key / 云端令牌（更要删）
+#   server/data/ 里除下面这些以外的全部内容 —— 他的看板、词单、向量、录音、审计
+#     .gitkeep · README.md · dashboard.json · plan.json · school-calendar.json · vocab/{lists,progress}.json
+#   logs/ · scripts/Workstation.vbs · scripts/__pycache__/   —— 日志与运行时产物
+```
+
+删完第一次 `npm run server` 时会重新生成 `server/config.json`（含**新的**随机令牌），
+数据目录缺文件时按空结构处理 —— 所以「删干净」不会把程序弄坏，见下面「配置与密钥放哪」。
+`git clean -xdn` 有个容易误会的地方：`-x` 会**连未提交的新文件一起列出来**（包括你自己刚写的功能），
+所以它只是一份「这份副本多带了什么」的清单，别直接 `-xdf` 扫掉手上的活。
 
 ### 安装与运行
 
@@ -99,27 +146,110 @@ npm run dev:all    # 一条命令起两个：边车（后台）+ Vite（前台�
 
 改端口要一起改：`server/config.json` 的 `auth.allowedOrigins`（否则页面自己的来源被白名单挡掉）与前端 `.env.local` 的 `VITE_SIDECAR_URL`。
 
+---
+
+## 贡献 · 许可 · 从哪读起
+
+**第一次来**：按这个顺序读三份文档，20 分钟就能自己加出一个功能 ——
+
+1. [docs/EXTENDING.md](docs/EXTENDING.md) —— **加功能怎么加**（内核概念 → 三步法 → 加接口 → 加配置 → 长任务约定 → 别这么做的坑）；
+2. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §6「取舍与已知限制」—— **它现在哪里不行**（平台绑定、安全边界、数据目录的不一致、已知缺口）；
+3. [docs/verifying.md](docs/verifying.md) —— **改完怎么验**。
+
+想直接动手就在项目根跑一条命令（它会连注册、图标白名单、按需的后端文件一起改好）：
+
+```bash
+node scripts/new-feature.mjs reading --name 阅读笔记 --icon Reading --group study            # 纯页面
+node scripts/new-feature.mjs reading --name 阅读笔记 --icon Reading --group study --api --config   # 带接口与配置
+node scripts/new-feature.mjs reading --name 阅读笔记 --icon Reading --dry-run                # 只看会改什么
+```
+
+模板与逐项说明在 [`src/features/_template/`](src/features/_template/)；生成器**不允许**产生半截状态
+（锚点找不齐、id / 路由 / 图标撞车、生成的页面 SFC 解析不过 —— 任一条不成立就整体不动）。
+
+### 许可证
+
+**MIT** —— 见仓库根的 [`LICENSE`](LICENSE)。你可以自由使用、修改、分发、商用，只需保留那份版权声明与许可全文。
+
+**第三方来源与许可**：见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。摘要：
+
+- **后端（`server/`）零第三方依赖**（只有 `node:` 内置模块），所以那一半没有授权负担；
+- 前端依赖**全是宽松许可**，与本项目的 MIT 兼容 —— 直接依赖 6 个（vue / vue-router / pinia /
+  element-plus / @element-plus/icons-vue / katex，均 MIT），传递闭包 59 个里非 MIT 的只有
+  `entities`（BSD-2-Clause）、`normalize-wheel-es` / `source-map-js` / `speakingurl`（BSD-3-Clause）
+  与 `picocolors`（ISC）。
+- 随代码分发的非 npm 资源里，`src/assets/katex-fonts/*.woff2` 已核实为上游 KaTeX 自带字体（MIT，
+  与 `node_modules/katex/dist/fonts/` 逐字节相同）；**`src/assets/brand/ws-logo.webp` 是唯一一处
+  来源待权利人确认**（仓库里没留下出处，文件里也没有署名信息）—— 详见那份文件 §5.2。
+
+只带了**一部分**文件时（例如只拷 `dist/` 给别人）：至少把 `LICENSE` 与
+`THIRD-PARTY-NOTICES.md` 一起带上，因为构建产物里内联着上面那些依赖。
+
+### 提交前
+
+四条硬性要求（都是**能自动验**的，不靠自觉）：
+
+```bash
+npm test              # 纯逻辑回归（node:test，4 个文件 36 个用例）
+npm run typecheck     # vue-tsc --noEmit（含 .vue 模板）
+npm run build         # 前端能构建（会连带发现删了模块忘清 import 之类）
+npm run server        # 边车能起，看启动日志与 /api/health
+```
+
+CI（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）在 ubuntu 与 windows 两个平台跑前三条 +
+`test:parity`。**它刻意不跑 `test:pguard` 与 `npm run server`**：前者要真机的 powershell 采样、
+结果随 runner 上跑着什么而变；后者会常驻。这两条要在真机上手工验（见 [docs/verifying.md](docs/verifying.md)）。
+
+提交信息没有强制格式（**没有** commitlint / husky / linter —— 见下面「不引入什么」），
+但请写清「改了什么 + 为什么」；一个改动一个提交，别把格式化噪声混进来。
+
+发现问题 / 想加功能：到本仓库的 GitHub Issues 开一条（仓库地址见 `git remote -v`）。
+带**复现步骤**与 `npm run server` 的启动日志最有帮助；安全 / 隐私相关请看 [docs/PRIVACY.md](docs/PRIVACY.md)
+里「哪六类东西不该进仓库」——**别把密钥贴进 issue**。
+
+几条硬性约定（改代码前先读）：
+
+1. **不要动内核去加功能**。新功能一律走「`src/features/<名字>/` + `registerModule()`」三步法
+   （见 [docs/EXTENDING.md](docs/EXTENDING.md)，或者直接跑 `node scripts/new-feature.mjs`）。
+2. **不要把个人路径、学号、密钥、令牌写进代码或文档**。要放路径就放配置项，要放密钥就进 `credentials.json`（在 `SECRET_PATHS` 里加一条）。
+3. **新配置项要同时改三处**（`DEFAULTS` / 白名单 / `server/config.example.json`），否则别人不知道有这一项；漏了 `npm test` 会点名（见 [docs/CONFIG.md](docs/CONFIG.md) §10）。
+4. **不要提交** `server/config.json`、`server/credentials.json`、`server/data/` 里除示例之外的内容、以及 `logs/`；提交前 `git status --short` 看一眼。
+5. 样式只引用 `src/styles/tokens.css` 的变量，不要新增硬编码颜色（见 [docs/design-system.md](docs/design-system.md)）。
+
+**不引入什么（这是取舍，不是没做）**：任何 linter / formatter / 测试框架 —— 它们会往 `devDependencies`
+里塞东西，破坏「**边车零第三方依赖 + 前端只有 6 个包**」这个卖点（[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §5 把它当核心取舍）。
+`node --test` + `vue-tsc` + 上面那几条零依赖脚本已经够用；**也给 `server/` 加任何 npm 包**是同样理由。
+
+**不包含什么（以及为什么）**：仓库刻意不带任何依赖**特定学校私有接口**、**个人账号池**或**对第三方客户端做逆向**的能力 —— 这些东西要么依赖别人拿不到的接口与身份，要么把服务条款风险与凭据管理责任转给使用者；云盘实现同理，所以只留接口位与 [docs/文件传输.md](docs/文件传输.md)。进程守护是自研引擎（`server/lib/pguard.mjs`），不需要任何外部工具配合。
+
+---
+
 ## 配置与密钥放哪
 
 **四个位置，一个原则：能拷给人看的和不能示人的分开放，且都不进版本库。**
 
-| 文件 | 放什么 | 进版本库？ |
-|---|---|---|
-| `server/config.example.json` | 模板 + 逐项说明（`"//"` 开头的键是注释） | **是**（唯一提交的一份） |
-| `server/config.json` | 你的实际配置：端口、目录、端点地址… | 否（首次运行自动生成） |
-| `server/credentials.json` | 凭据：面板令牌、模型 API Key、MinerU 令牌… | 否（第一次写入密钥时生成） |
-| `server/data/` | 看板、词单、向量、上传的音频、审计… | 否（只放行 7 个示例文件，见 `server/data/README.md`） |
+| 文件 | 放什么 | 进版本库？ | 什么时候出现 / 不出现会怎样 |
+|---|---|---|---|
+| `server/config.example.json` | 模板 + 逐项说明（`"//"` 开头的键是注释） | **是**（唯一提交的一份） | 一直都有。**程序不读它**，它只供你照着改 |
+| `server/config.json` | 你的实际配置：端口、目录、端点地址… | 否 | 首次运行（`loadConfig()` 发现文件不存在）时生成，里面含**随机生成的 `auth.token`**。删掉它再启动＝回到出厂默认 + 一枚新令牌 |
+| `server/credentials.json` | 凭据：模型 API Key、MinerU 令牌、身份补充… | 否 | **第一次保存密钥时**才出现（`saveConfig()` 收到敏感项，或启动时把老 `config.json` 里的明文密钥迁过来）。**从来没配过密钥就一直不存在 —— 这是正常状态，不是装坏了**；读不到时按「没有任何密钥」处理，各模块会自己降级/隐藏 |
+| `server/data/` | 看板、词单、向量、上传的音频、审计… | 否（只放行 7 个示例文件，见 `server/data/README.md`） | **用到时才生成**；文件缺失时 `jsonstore.mjs` 按**空结构**处理，所以「没有任何数据」也是正常状态 |
 
-- 代码里读写配置一律走 `server/config.mjs` 的 `loadConfig()` / `saveConfig()`。哪些字段算敏感由 `SECRET_PATHS` 决定（`server/config.mjs`），保存时会自动从 `config.json` 拆到 `credentials.json`；老配置里混在 `config.json` 的明文密钥首次加载会自动搬迁。
-- **令牌**：`auth.token` 首次运行随机生成并写回 `server/config.json`；页面通过 `/api/auth/token` 自助取（该接口本身过 Origin 白名单），脚本与 MCP 客户端则带 `X-WS-Token`（也认 `Authorization: Bearer` 与 `?token=`，见 `server/lib/auth.mjs`）。
-- **改配置推荐在页面「设置与数据」里改**：`PATCH /api/config` 是**白名单式**写入（`CONFIG_EDITABLE`），多余的字段会被拒绝并在响应里点名，不会一个手滑把边车自己的配置写坏。
+- 代码里读写配置一律走 `server/config.mjs` 的 `loadConfig()` / `saveConfig()`。哪些字段算敏感由 `SECRET_PATHS` 决定（`server/config.mjs`），保存时会自动从 `config.json` 拆到 `credentials.json`；老配置里混在 `config.json` 的明文密钥首次加载会自动搬迁。**改配置改顶层**：`wiki.*` 里有几节是只读镜像，启动时会被顶层覆盖（`syncConfigMirrors()`）。
+- **页面令牌**：`auth.token` 首次运行随机生成并写回 `server/config.json`；页面通过 `/api/auth/token` 自助取（该接口本身过 Origin 白名单），脚本与 MCP 客户端则带 `X-WS-Token`（也认 `Authorization: Bearer` 与 `?token=`，见 `server/lib/auth.mjs`）。
+- **改配置推荐在页面「设置与数据」里改**：`PATCH /api/config` 是**白名单式**写入，白名单分两张（**分节** / **标量**，都在 `server/lib/config-editable.mjs`），多余的字段会被拒绝并在响应里点名，不会一个手滑把边车自己的配置写坏。加新配置项要同时改 `DEFAULTS` + 白名单 + 模板三处，漏了 `npm test` 会拦（`scripts/tests/config-whitelist.test.mjs`）。
 - 密钥文件的实际名字是 **`credentials.json`**（不是 `secrets.json`）。`.gitignore` 里除了逐个列名，还兜底忽略任何 `*secret*.json`、`.env*`、`*session*`、`cookies*`、`*.pem`、`*.key`。
-- `server/config.example.json` 是**模板**（程序不读它，只供你照着改）：要改配置就编辑首次运行生成的 `server/config.json`，或在页面「设置与数据」里改。模板里**故意不写 `dataDir` 这一项** —— 不写就用默认的仓库内 `server/data/`；**写 `""` 不算回默认**（`dataDir()` 会返回空串，相对路径会把数据落到进程 cwd 下），要挪盘就填绝对路径。数据目录的代码入口只有一个 —— `server/config.mjs` 的 `dataDir()`（读 `WS_DATA_DIR` 环境变量或配置里的 `dataDir`），细节见 [docs/CONFIG.md](docs/CONFIG.md)。
+- `server/config.example.json` 是**模板**：要改配置就编辑首次运行生成的 `server/config.json`，或在页面「设置与数据」里改。模板里**故意不写 `dataDir` 这一项** —— 不写就用默认的仓库内 `server/data/`；**写 `""` 不算回默认**（`dataDir()` 会返回空串，相对路径会把数据落到进程 cwd 下），要挪盘就填绝对路径。数据目录的代码入口只有一个 —— `server/config.mjs` 的 `dataDir()`（读 `WS_DATA_DIR` 环境变量或配置里的 `dataDir`），细节见 [docs/CONFIG.md](docs/CONFIG.md)。
+- **路径一律写正斜杠**（`C:/data/x`）。JSON 会把反斜杠当转义吃掉：`%APPDATA%\\Microsoft\\…` 写进模板后变成 `%APPDATA%Microsoft…`，看着是合法 JSON、实际路径连不起来 —— 模板里那条注释本身踩过这个坑。
 
 ## 目录结构
 
 ```
 workstation-oss/
+├─ LICENSE                     本项目许可（MIT）
+├─ THIRD-PARTY-NOTICES.md      第三方来源与许可清单（依赖闭包、字体、品牌图）
+├─ .nvmrc                      Node 版本（22；与 package.json 的 engines >=22.6 对齐）
+├─ .github/workflows/ci.yml    CI：ubuntu + windows 跑 typecheck / test / parity / build
 ├─ index.html                  页面壳
 ├─ vite.config.ts              Vite：Element Plus 按需引入、@ → src、dedupe、dev 端口 5273
 ├─ tsconfig.json
@@ -136,7 +266,8 @@ workstation-oss/
 │  ├─ components/              PageHeader · EmptyState · MdLite · SidecarOffline · SentencePractice
 │  ├─ views/                   HomeView（全部应用）· SettingsView · DevGuideView · NotFoundView
 │  ├─ features/                功能模块，一个目录一个模块
-│  │  ├─ index.ts              ★ 总装配处：registerModule 全在这里
+│  │  ├─ index.ts              ★ 总装配处：registerModule 全在这里（有 `// ↓ 新模块 import / 下一个功能` 锚点）
+│  │  ├─ _template/            ★ 功能模板（**不在注册表里**，不是功能）；也是 new-feature.mjs 的输入
 │  │  ├─ dashboard/            每日看板（今日 / 趋势 / AI 三页）
 │  │  ├─ office/               日历日程 · 模型用量
 │  │  ├─ plan/                 规划台
@@ -144,7 +275,8 @@ workstation-oss/
 │  │  ├─ wiki/                 知识库（工作区 + 5 个 panel + 问答 + 入库 + 设置）
 │  │  ├─ memo/                 语音随记
 │  │  ├─ guard/                进程守护（概览 / 进程 / 参数 / 名单 / 日志 / 端口 / 智能体）
-│  │  └─ settings/             LlmSection · EmbeddingSection · SearchSection
+│  │  ├─ service/              运行与自启（边车状态 + 开机自启位；一个模块只占一个页面 + 一条接口，可当范本抄）
+│  │  └─ settings/             LlmSection · EmbeddingSection · SearchSection（**不是模块**，只被设置页引用）
 │  ├─ styles/                  tokens.css（设计令牌 = 唯一配色源）· index.css · wiki.css
 │  ├─ assets/                  brand/ws-logo.webp · katex-fonts/（5 个 woff2）
 │  └─ types/                   assets.d.ts · env.d.ts · router.d.ts
@@ -156,24 +288,40 @@ workstation-oss/
 │  ├─ lib/                     能力库，一件事一个文件（见下表）
 │  └─ data/                    本机数据（只提交 7 个示例文件）
 ├─ scripts/                    start.mjs · dev-all.mjs · seed-demo-data.mjs
-│                              parser-parity.mjs · pguard-smoke.mjs · tests/ · *.py
+│  │                            parser-parity.mjs · pguard-smoke.mjs
+│  ├─ new-feature.mjs          ★ 生成一个功能模块骨架（注册 / 图标 / 接口 / 配置一起改好）
+│  ├─ panel-autostart.mjs      自启位的命令行开关（`#/service` 那一页的无界面版）
+│  ├─ lib/feature-scan.mjs     扫描 src/features 的静态解析（生成器与契约测试共用）
+│  ├─ tests/                   node:test 用例（core · singleton · config-whitelist · module-contract）
+│  └─ restart-sidecar.py · sidecar-keepalive.py（两个 .py，见下面）
 └─ docs/                       ARCHITECTURE · EXTENDING · FEATURES · CONFIG
                                PRIVACY · PERFORMANCE · design-system · verifying
                                校历格式 · 每日一句导入 · 文件传输
 ```
 
+**两个 `.py`（Windows 专用，只在需要「重启 / 保活」时才用）**：
+
+| 脚本 | 干什么 | 什么时候用 |
+|---|---|---|
+| `scripts/restart-sidecar.py` | 杀旧实例 → 缺就生成 `scripts/Workstation.vbs` → 修好启动文件夹里的 `.lnk` → 无窗口起新边车 → 轮询 `/api/health` 到就绪 | 改完边车要重启、自启位坏了要修、或者不想让终端窗口一直开着。「运行与自启」页（`#/service`）只做自启位，**不重启**（边车重启自己会先把自己杀掉） |
+| `scripts/sidecar-keepalive.py` | 边车掉线就把它拉回来（探测 `/api/health`） | 想「挂了自动回来」时手动挂上；默认不自启 |
+
+两个脚本都只用标准库、都不写死本机路径（node 走 `WS_NODE` → `PATH` → 常见安装位）；
+`restart-sidecar.py` 的详细流程写在它自己的文件头。它们**没有**进 `package.json` 的 scripts
+（要跨平台就得先给这一层做实现分派，见「环境要求」）。
+
 `server/lib/` 一览（按用途分组）：
 
 | 用途 | 文件 |
 |---|---|
-| 骨架 / 安全 | `auth.mjs`（两道闸）· `singleton.mjs`（单实例）· `net.mjs`（端口/进程/spawn/HTTP）· `elevate.mjs`（一次性 UAC） |
+| 骨架 / 安全 | `auth.mjs`（两道闸）· `singleton.mjs`（单实例）· `net.mjs`（端口/进程/spawn/HTTP）· `elevate.mjs`（一次性 UAC）· `config-editable.mjs`（`PATCH /api/config` 的白名单，独立成文件是为了能被测试对账） |
 | 存储 / 模型调用 | `jsonstore.mjs`（加固 JSON 存储）· `llm.mjs`（输出预算守卫）· `usage-cache.mjs`（两级定时同步 + 落盘缓存） |
 | 看板 / 规划 / 校历 | `dashboard.mjs` · `plan.mjs` · `school-calendar.mjs` · `summaries.mjs` · `ai.mjs` |
 | 英语学习 | `vocab.mjs` · `srs.mjs` · `english-daily.mjs` |
 | 知识库 | `wiki.mjs` · `wiki-queue.mjs` · `wiki-parse.mjs` · `wiki-cloud.mjs` · `wiki-embed.mjs` · `wiki-llm.mjs` · `wiki-chat.mjs` · `wiki-fetch.mjs` · `wiki-websearch.mjs` |
 | 语音随记 | `memo.mjs` · `asr.mjs`（OpenAI 兼容转写） |
 | 本机监控 | `pguard.mjs`（进程守护引擎）· `procs.mjs`（采样）· `procscan.mjs`（进程/端口/智能体快照） |
-| 系统集成 | `panel.mjs` · `autostart.mjs`（启动文件夹自启位） |
+| 系统集成 | `panel.mjs` · `autostart.mjs`（启动文件夹自启位）—— 页面在「运行与自启」`#/service` |
 | 外部面板 | `newapi.mjs`（余额 / 令牌 / 日志 / 聊天，OpenAI 兼容） |
 | 留给你接的 | `transfer/`（文件传输的接口位，目前只有 README，见 [docs/文件传输.md](docs/文件传输.md)） |
 
@@ -191,10 +339,14 @@ workstation-oss/
 | **知识库** | `#/wiki` | 抓链接 / 拖文件 → 队列 → 编译成互链页面；语义检索、双链图谱、会话问答、结构体检 | `wiki.dir`（**没配就不显示**） |
 | **语音随记** | `#/memo` | 传一段录音 → 转写 → 自动起标题写摘要 → 落成一条记录 | `asr.baseUrl`（**没配就不显示**） |
 | **进程守护** | `#/process-guard` | 按 CPU 阈值释放开发工具内存、结束失控进程、定时回收；另带端口与智能体视图。**出厂演练模式：只记录不动手** | 无 |
+| **运行与自启** | `#/service` | 边车自己的状态（端口 / PID / node / 入口）＋ 开机自启位体检（编码 / 路径 / 用的哪个 node）与开启 / 关闭 / 删除 | 无（Windows 才用得上，见「环境要求」） |
+
+> 「运行与自启」也有命令行版（装机器、无界面场景更顺）：`npm run autostart:on` / `npm run autostart:off`，
+> 或者 `node scripts/panel-autostart.mjs status`（只读体检）。它们都要求边车已经在跑。
 
 两点补充：
 
-- **分组与置顶**：侧边栏按 `MODULE_GROUPS`（成长 / 办公 / 学习 / 待办 / 教务）归组，空组不渲染；`category` 留空的模块固定在导航最上方（当前只有「进程守护」）。模块自己的二级菜单来自它路由里带 `meta.title` 且没标 `meta.hideInNav` 的项。
+- **分组与置顶**：侧边栏按 `MODULE_GROUPS`（成长 / 办公 / 学习 / 待办 / 校内）归组，空组不渲染；`category` 留空的模块固定在导航最上方（当前是「进程守护」与「运行与自启」）。模块自己的二级菜单来自它路由里带 `meta.title` 且没标 `meta.hideInNav` 的项。
 - **看板是容器，不是功能全集**：看板保留的是存储模型（`server/lib/dashboard.mjs`）+ AI 总结卡（`server/lib/summaries.mjs`）+ 卡片位。想加自己的卡：后端往 `/api/overview` 的返回里加一节（或另开 `/api/*`），前端在 `src/features/dashboard/DashboardHome.vue` 里加一张卡，写法照现有卡片抄。
 
 ## MCP 接入
@@ -222,6 +374,7 @@ curl -s -X POST http://127.0.0.1:5278/mcp \
 
 ## 文档
 
+- [docs/TOP-DESIGN.md](docs/TOP-DESIGN.md) —— **顶层设计**：分层、单一事实源、复用声明机制、债务台账、文案与注释规约、性能基线
 - [docs/EXTENDING.md](docs/EXTENDING.md) —— **上手扩展指南**：内核概念、加页面模块 / 加边车接口的完整步骤、数据与长任务约定、别这么做的坑
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) —— 架构：分层与数据流、一次请求的完整链路、鉴权握手、边车的启动与生命周期、单实例与自启、取舍与已知限制
 - [docs/FEATURES.md](docs/FEATURES.md) —— 功能清单：注册了哪些模块、内核自带页面、边车能力清单、MCP 工具（43 个）、外部依赖清单、命令一览，以及**本开源版移除 / 泛化了什么**
@@ -234,6 +387,7 @@ curl -s -X POST http://127.0.0.1:5278/mcp \
 - [docs/每日一句导入.md](docs/每日一句导入.md) —— 自己买课之后怎么把句库转成能读的格式
 - [docs/文件传输.md](docs/文件传输.md) —— 想接 WebDAV / S3 / rclone 时该实现哪些函数
 - [server/data/README.md](server/data/README.md) —— 数据目录里哪些是示例、哪些是运行时生成的
+- [`LICENSE`](LICENSE) · [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) —— 本项目许可（MIT）与第三方来源清单（含唯一的来源待确认项：品牌图）
 
 ## 常见问题
 
@@ -269,43 +423,3 @@ curl -s -X POST http://127.0.0.1:5278/mcp \
 **Q：脚本 / 智能体怎么调边车？**
 带令牌：`X-WS-Token: <token>`（也认 `Authorization: Bearer` 与 `?token=`）。令牌值在 `server/config.json` 的 `auth.token`；`/api/health` 与 `/api/auth/token` 免令牌，其余 `/api/*` 与 `/mcp` 都要带。MCP 端点就是 `http://127.0.0.1:5278/mcp`。
 
-## 许可证与贡献
-
-**许可证：目前仓库里没有 LICENSE 文件**（也没有 `CONTRIBUTING.md`、`.github/` 或 CI 配置）。按默认版权规则，**未声明许可 = 保留所有权利**，别人不能直接复用 / 修改 / 分发 —— 所以在你补上许可之前，请把它当作「可以阅读的源码」。
-
-要开源出去，建议二选一（`server/` 零第三方依赖、前端依赖全是宽松许可，选哪个都很自由）：
-
-- **MIT**：最简单，允许商用，只需保留版权声明；
-- **Apache-2.0**：多一条专利授权与变更说明的要求，公司场景更常见。
-
-依许可证需一并声明的第三方来源（版本与许可以 `node_modules/<包>/package.json` 的 `license` 字段为准，本次实测）：
-
-| 包 | 版本 | 许可 |
-|---|---|---|
-| vue | 3.5.42 | MIT |
-| vue-router | 4.6.4 | MIT |
-| pinia | 3.0.4 | MIT |
-| element-plus / @element-plus/icons-vue | 2.14.5 / 2.3.2 | MIT |
-| katex | 0.16.47 | MIT |
-| vite | 7.3.6 | MIT |
-| typescript | 5.9.3 | Apache-2.0 |
-
-另外两处需要你自己确认：`src/assets/brand/ws-logo.webp`（品牌图标）与 `src/assets/katex-fonts/*.woff2`（KaTeX 的字体子集，上游 KaTeX 为 MIT）。
-
-**贡献**：改完请按 [docs/verifying.md](docs/verifying.md) 过一遍，最低限度这三条：
-
-```bash
-npm test            # 纯逻辑回归（node:test，14 个用例）
-npm run build       # 前端能构建（会连带发现删了模块忘清 import 之类）
-npm run server      # 边车能起，看启动日志与 /api/health
-```
-
-几条硬性约定（改代码前先读）：
-
-1. **不要动内核去加功能**。新的功能一律走「`src/features/<名字>/` + `registerModule()`」三步法（见 [docs/EXTENDING.md](docs/EXTENDING.md)）。
-2. **不要把个人路径、学号、密钥、令牌写进代码或文档**。要放路径就放配置项，要放密钥就进 `credentials.json`（在 `SECRET_PATHS` 里加一条）。
-3. **新配置项要在 `server/config.example.json` 里也有一条**（带说明），否则别人不知道有这一项。
-4. **不要提交** `server/config.json`、`server/credentials.json`、`server/data/` 里除示例之外的内容、以及 `logs/`；提交前 `git status --short` 看一眼。
-5. 样式只引用 `src/styles/tokens.css` 的变量，不要新增硬编码颜色（见 [docs/design-system.md](docs/design-system.md)）。
-
-**不包含什么（以及为什么）**：仓库刻意不带**教务查询 / 自动签到**（依赖某一所学校的私有接口与个人身份，且自动化签到涉及代替本人完成考勤）、**账号池与刷量自动化**（把服务条款风险与凭据管理责任转给使用者）、**网盘实现**（原来那份建在私有接口与网页 cookie 上，换个版本就失效；这里只留接口位与 [docs/文件传输.md](docs/文件传输.md)）、以及**任何对第三方客户端做逆向的本机工具链**。进程守护的前身是一个第三方 C# / WinUI 3 工具，其源码不随本仓库分发，开源版里只剩自研引擎 `server/lib/pguard.mjs`。

@@ -1,11 +1,11 @@
 /**
  * 工作站的 MCP server（Streamable HTTP，挂在本边车的 /mcp 上）。
  *
- * 目的：让智能体（ZCode / Codex / 其他 MCP 客户端）能读写工作站的数据 ——
+ * 目的：让智能体（任意 MCP 客户端）能读写工作站的数据 ——
  * 读今日看板、加计划、写笔记、查余额、读写词单、读写知识库、读写规划台、操作语音随记。
  * 与「MCP 只是另一条读取通道」不同，这里也提供写能力，因为看板的价值就在于被自动记录。
  *
- * 工具表只覆盖**本项目自带的能力**：任何依赖校方私有接口或作者本机服务的工具都不在这里。
+ * 工具表只覆盖**本项目自带的能力**：任何依赖特定机构私有接口或使用者本机服务的工具都不在这里。
  * 想加自己的数据源，照下面 TOOLS 与 HANDLERS 各加一条即可（两边名字必须一致）。
  *
  * 实现方式是 JSON-RPC 2.0 的子集：initialize / tools/list / tools/call (+ ping)。
@@ -311,7 +311,7 @@ const TOOLS = [
   {
     name: 'get_agent_sessions',
     description:
-      '读本机的「智能体会话」：哪些 CLI 智能体在跑（claude / codex / gemini / cursor … 以及配置里额外加的 ZCode）、' +
+      '读本机的「智能体会话」：哪些 CLI 智能体在跑（claude / codex / gemini / cursor … 以及配置里额外加的客户端（procscan.agentExtras））、' +
       '每个会话（以智能体进程为根的子树，到 shell 为止）里有哪些进程、各占多少内存。只读。' +
       '**结束进程/会话不开放给智能体**，那要在面板上由人点确认。',
     inputSchema: { type: 'object', properties: {} },
@@ -370,7 +370,7 @@ const TOOLS = [
     name: 'fetch_wiki_source',
     description:
       '把一个外部链接（X/Twitter 长文或推文）抓成原始资料，落到知识库 raw/sources/ 里，之后可用 ingest_wiki_source 编译成页面。' +
-      '只新增文件、不覆盖已有的（要覆盖得显式带 overwrite）。图片只保留原图链接：本机当前网络到 pbs.twimg.com 不通。',
+      '只新增文件、不覆盖已有的（要覆盖得显式带 overwrite）。图片不下载，只保留原图链接。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -384,7 +384,7 @@ const TOOLS = [
   {
     name: 'ingest_wiki_source',
     description:
-      '把 raw/ 里的一份资料「编译」成 wiki 页面（原桌面端的 Ingest）：模型按 schema.md 产出 source/concept/entity 页面并更新 index.md 与 log.md。' +
+      '把 raw/ 里的一份资料「编译」成 wiki 页面：模型按 schema.md 产出 source/concept/entity 页面并更新 index.md 与 log.md。' +
       '默认只新建页面、不重写已有页面；dryRun=true 时只回计划不落盘 —— 建议先 dryRun 看一眼。',
     inputSchema: {
       type: 'object',

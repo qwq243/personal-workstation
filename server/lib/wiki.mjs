@@ -1,18 +1,16 @@
 /**
  * 知识库（本地 markdown wiki 的读写实现）。
  *
- * 背景：原先这份能力在一个独立的桌面应用里（本地 HTTP 服务 + 自带的阅读/编辑界面），
- * 工作站是隔着它的本地 API 去用的。现在把这份能力搬进工作站边车，页面在 `#/wiki`，接口在 `/api/wiki/*`，
- * 智能体走 MCP 的 wiki_* 工具 —— 于是不用再单独开那个窗口，一份库、一个入口。
+ * 本仓库自带的实现：页面在 `#/wiki`，接口在 `/api/wiki/*`，智能体走 MCP 的 wiki_* 工具 ——
+ * 一个入口就够，不用再单独开一个窗口。
  *
- * 库还是那个库：目录是个普通的本地文件夹（路径在设置里配），格式（schema.md 定义的
- * wiki/ 六个类型的目录 + frontmatter + [[双链]]）一个字没改，Obsidian 这类
- * Markdown 工具想打开也照样能开。raw/ 依旧是不可变的原始资料，本模块只往里加、不修改。
+ * 库是个普通的本地文件夹（路径在设置里配），格式是一套通用的 markdown wiki 约定
+ * （schema.md 定义的 wiki/ 六个类型的目录 + frontmatter + [[双链]]），
+ * Obsidian 这类 Markdown 工具想打开也照样能开。raw/ 是不可变的原始资料，本模块只往里加、不修改。
  *
- * 与桌面端的分工差异（有意为之）：
- *   - 向量检索换成词法检索（标题加权 + 中文二元切分）。桌面端用 LanceDB 做向量库，
- *     那份索引是它自己维护的二进制文件；边车不引入向量依赖，先保证「搜得到、可解释」，
- *     真需要语义检索时再接 NewAPI 的 embedding。
+ * 两处实现取舍（有意为之）：
+ *   - 向量检索换成词法检索（标题加权 + 中文二元切分）。不引入向量库依赖，先保证
+ *     「搜得到、可解释」，真需要语义检索时再接 NewAPI 的 embedding。
  *   - 编译（ingest）走 NewAPI 的对话模型，产出严格 JSON 计划再落盘：默认只新建页面、
  *     不动已有页面，动之前一律先备份到 server/data/wiki-backups/。
  *     这样即使模型跑偏，库里也不会被写坏。
@@ -23,6 +21,7 @@ import path from 'node:path'
 import { loadConfig } from '../config.mjs'
 import { writeAtomic } from './jsonstore.mjs'
 import { chat } from './newapi.mjs'
+import { chatGuarded } from './llm.mjs'
 import * as llm from './wiki-llm.mjs'
 import { fetchToSource } from './wiki-fetch.mjs'
 import * as embed from './wiki-embed.mjs'
@@ -65,7 +64,12 @@ export function root() {
 /* ------------------------------------------------------------ 多库 --- */
 
 /**
- * 多库（桌面端的 projects）：一个知识库 = 一个目录，带上 .llm-wiki/project.json 的身份。
+ * 多库：一个知识库 = 一个目录，带上 .workstation-kb/project.json 的身份。
+ *
+ * ⚠️ 这个元数据目录名是**本项目自己的**：库本体那份 `wiki/` + `schema.md` + `[[双链]]` 是通用约定
+ * （别的工具也认），但 `.workstation-kb/` 只有本项目认 —— 从别的知识库工具搬库过来时，
+ * 元数据要自己搬（`project.json` 是库身份、`skills/` 是库内技能）。没有它也能用，
+ * 只是这个库会被当成「还没初始化」，库内技能也读不到。
  *
  * 「当前是哪个库」存在 server/data/wiki-projects.json（与配置分开）：
  * 切库是高频动作，不该每次去改 config.json；config.json 里的 wiki.dir 只当默认值。
@@ -91,7 +95,7 @@ function saveProjectsState(st) {
 
 function projectName(dir) {
   try {
-    return fs.readFileSync(path.join(dir, '.llm-wiki', 'project.json'), 'utf8') && path.basename(dir)
+    return fs.readFileSync(path.join(dir, '.workstation-kb', 'project.json'), 'utf8') && path.basename(dir)
   } catch {
     return path.basename(dir)
   }
@@ -105,7 +109,7 @@ export function projects() {
   const rootNow = root()
   const items = dirs.map((dir) => {
     const exists = fs.existsSync(dir)
-    const isLib = exists && (fs.existsSync(path.join(dir, 'wiki')) || fs.existsSync(path.join(dir, '.llm-wiki')))
+    const isLib = exists && (fs.existsSync(path.join(dir, 'wiki')) || fs.existsSync(path.join(dir, '.workstation-kb')))
     const known = st.items.find((i) => i.dir === dir)
     return {
       id: known?.id ?? projectIdOf(dir),
@@ -124,7 +128,7 @@ export function projects() {
 
 function projectIdOf(dir) {
   try {
-    return JSON.parse(fs.readFileSync(path.join(dir, '.llm-wiki', 'project.json'), 'utf8')).id ?? ''
+    return JSON.parse(fs.readFileSync(path.join(dir, '.workstation-kb', 'project.json'), 'utf8')).id ?? ''
   } catch {
     return ''
   }
@@ -159,8 +163,8 @@ export function setProject(idOrDir) {
   const dir = hit?.dir ?? key
   if (!dir) return { ok: false, error: '没给库目录' }
   if (!fs.existsSync(dir)) return { ok: false, error: `目录不存在：${dir}` }
-  if (!fs.existsSync(path.join(dir, 'wiki')) && !fs.existsSync(path.join(dir, '.llm-wiki'))) {
-    return { ok: false, error: `${dir} 不像一个知识库（缺 wiki/ 与 .llm-wiki/）。要用它当库，先在设置里「初始化为知识库」。` }
+  if (!fs.existsSync(path.join(dir, 'wiki')) && !fs.existsSync(path.join(dir, '.workstation-kb'))) {
+    return { ok: false, error: `${dir} 不像一个知识库（缺 wiki/ 与 .workstation-kb/）。要用它当库，先在设置里「初始化为知识库」。` }
   }
   if (hit) hit.lastOpened = new Date().toISOString()
   st.active = dir
@@ -237,7 +241,7 @@ export async function initProject(dir, { name, language = 'Chinese' } = {}) {
     created.push(rel)
   }
   try {
-    for (const sub of ['wiki/entities', 'wiki/concepts', 'wiki/sources', 'wiki/queries', 'wiki/comparisons', 'wiki/synthesis', 'wiki', 'raw/sources', 'raw/assets', '.llm-wiki']) {
+    for (const sub of ['wiki/entities', 'wiki/concepts', 'wiki/sources', 'wiki/queries', 'wiki/comparisons', 'wiki/synthesis', 'wiki', 'raw/sources', 'raw/assets', '.workstation-kb']) {
       await fsp.mkdir(path.join(d, sub.split('/').join(path.sep)), { recursive: true })
     }
     await writeIfAbsent('schema.md', SCHEMA_TEMPLATE)
@@ -248,13 +252,13 @@ export async function initProject(dir, { name, language = 'Chinese' } = {}) {
     await writeIfAbsent('wiki/index.md', '# Wiki Index\n\n## Entities\n\n## Concepts\n\n## Sources\n\n## Queries\n\n## Comparisons\n\n## Synthesis\n')
     await writeIfAbsent('wiki/log.md', `# Research Log\n\n## ${today}\n\n- 项目创建\n`)
     await writeIfAbsent('wiki/overview.md', `---\ntype: overview\ntitle: Project Overview\ntags: []\nrelated: []\n---\n\n# Overview\n\n<!-- 高层的现状总结，随理解加深更新 -->\n`)
-    if (!fs.existsSync(path.join(d, '.llm-wiki', 'project.json'))) {
+    if (!fs.existsSync(path.join(d, '.workstation-kb', 'project.json'))) {
       await fsp.writeFile(
-        path.join(d, '.llm-wiki', 'project.json'),
+        path.join(d, '.workstation-kb', 'project.json'),
         JSON.stringify({ id: randomId(), createdAt: Date.now(), name: name ?? path.basename(d), language }, null, 2),
         'utf8',
       )
-      created.push('.llm-wiki/project.json')
+      created.push('.workstation-kb/project.json')
     }
   } catch (err) {
     return { ok: false, error: err.message }
@@ -541,7 +545,7 @@ export function status() {
 
 export function projectId() {
   const r = root()
-  const p = r ? path.join(r, '.llm-wiki', 'project.json') : ''
+  const p = r ? path.join(r, '.workstation-kb', 'project.json') : ''
   try {
     return JSON.parse(fs.readFileSync(p, 'utf8')).id ?? ''
   } catch {
@@ -587,7 +591,7 @@ export function readPage(rel) {
   }
 }
 
-/** 一页的完整视图：正文 + 出链 + 反链（反链是原来桌面端最常用的那件事） */
+/** 一页的完整视图：正文 + 出链 + 反链 */
 export function pageDetail(rel) {
   const got = readPage(rel)
   if (!got.ok) return got
@@ -815,7 +819,7 @@ export function graph({ q = '', type = '', limit = 300 } = {}) {
 /* ------------------------------------------------------------ 体检 --- */
 
 /**
- * 结构体检 —— 对应原桌面端的 Review 列表：孤立页、死链、缺 frontmatter、索引不同步、料没编译。
+ * 结构体检 —— 孤立页、死链、缺 frontmatter、索引不同步、料没编译。
  * 只报不动手：修不修由人决定（自动改页面风险太高）。
  */
 export function lint() {
@@ -1027,7 +1031,7 @@ function stripLeadingFrontmatter(body) {
 }
 
 /**
- * 把一份 raw/ 资料编译成 wiki 页面（原桌面端的 Ingest）。
+ * 把一份 raw/ 资料编译成 wiki 页面。
  *
  * 安全策略：默认只新建页面，已存在的路径跳过；写任何文件前先备份 index.md/log.md。
  * dryRun 只回计划不落盘 —— 先看一眼模型打算写什么，再决定要不要真写。
@@ -1144,7 +1148,7 @@ export async function ingest(sourceRel, { dryRun = false, model, maxChars = 2400
 /* ------------------------------------------------------------ 问答 --- */
 
 /**
- * 基于库里已有页面回答（原桌面端 Chat 的简化版）。
+ * 基于库里已有页面回答。
  * 先把命中的页面正文塞进上下文，再要求模型**只用给出的材料**回答并标出引用；
  * 材料不足就直说 —— 知识库最怕的是模型拿常识冒充库里的结论。
  */
@@ -1175,7 +1179,15 @@ export async function ask(question, { topK = 6, model, history = [] } = {}) {
     ...history.slice(-4).map((h) => ({ role: h.role === 'user' ? 'user' : 'assistant', content: String(h.content ?? '').slice(0, 2000) })),
     { role: 'user', content: q },
   ]
-  const res = await chat(messages, { model, maxTokens: 1200, temperature: 0.3, timeout: 180000 })
+  // 走统一层：6 页材料塞进 system 后输入很大，预算按字数算（原写死 1200 会被思考吃光正文）
+  const res = await chatGuarded(messages, {
+    tier: 'normal',
+    chars: messages.reduce((n, m) => n + String(m.content ?? '').length, 0),
+    label: 'wiki.ask',
+    model,
+    temperature: 0.3,
+    timeout: 180000,
+  })
   if (!res.ok) return { ok: false, error: res.error, detail: res.detail }
   return {
     ok: true,
@@ -1295,7 +1307,7 @@ function saveReviewState(st) {
 }
 
 /**
- * 处理一条体检项（桌面端 Review 列表的「选项」）。
+ * 处理一条体检项。
  * 动作只做三件**可逆且明确**的事，其余一律不代劳：
  *   create-page —— 给死链补一页骨架（内容留空，等人写）
  *   compile     —— 把没编译的料丢进队列去编译（见 wiki-queue.mjs）

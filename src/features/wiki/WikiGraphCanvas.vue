@@ -22,7 +22,7 @@ const emit = defineEmits<{ (e: 'open', node: any): void }>()
 /** 画布按节点数伸缩（viewBox 正方形，svg 本身跟随容器宽） */
 const SIZE = computed(() => Math.min(1100, Math.max(700, 620 + (props.nodes?.length ?? 0) * 6)))
 
-/** 类型配色（对照桌面端）：concept 蓝紫 / source 青 / entity 绿 / overview 黄 / meta 灰 */
+/** 类型配色：concept 蓝紫 / source 青 / entity 绿 / overview 黄 / meta 灰 */
 const COLOR: Record<string, string> = {
   concept: '#5b5bd6',
   entity: '#3fb27f',
@@ -192,7 +192,7 @@ const viewBox = computed(() => {
   return `${vb.value.x} ${vb.value.y} ${w} ${w}`
 })
 /** 缩放后 stroke 跟着反比缩（不然放大后线粗得糊）；字号在**屏幕像素上恒定** —
- *  无论缩到几档标签都是 ~12px 屏幕字，不随图一起放大（Obsidian/桌面端就是这么排的），
+ *  无论缩到几档标签都是 ~12px 屏幕字，不随图一起放大（Obsidian 这类图谱就是这么排的），
  *  放大时只让「露出的标签数量」变多（见 hubIds），不让字变大。 */
 const kScale = computed(() => (vb.value.w || SIZE.value) / SIZE.value)
 
@@ -319,7 +319,7 @@ function shortLabel(s: string) {
 .wgraph__svg {
   width: 100%;
   max-height: 68vh;
-  /* 桌面端那张图是浅色描边深色纸：这里用工作站的深面板色，边和标签都提亮一档 */
+  /* 这里的取色：工作站的深面板色，边和标签都比深底提亮一档 */
   background: #171a22;
   border: 1px solid var(--ws-border);
   border-radius: var(--ws-radius);

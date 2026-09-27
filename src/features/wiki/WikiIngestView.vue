@@ -205,7 +205,7 @@ onUnmounted(() => {
     </div>
 
     <p class="wk-hint">
-      文档默认送 <b>MinerU 云端</b>解析（能出真表格、抽图片、OCR 扫描件）—— 也就是**文档内容会上传到第三方云端**；
+      文档默认送 <b>MinerU 云端</b>解析（能出真表格、抽图片、OCR 扫描件）—— 也就是<b>文档内容会上传到第三方云端</b>；
       介意就在设置里关掉，关掉后走本机通道（只能抽文本层、图片与扫描件拿不到）。
       <el-checkbox v-model="ingestAfterParse" size="small" style="margin-left: 8px">入队后顺带编译成页面</el-checkbox>
     </p>

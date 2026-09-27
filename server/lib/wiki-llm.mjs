@@ -1,14 +1,14 @@
 /**
- * 模型配置（按已退役的桌面端那套移植）。
+ * 模型配置。
  *
- * 桌面端把「用哪个模型」拆成三层，这里照搬：
+ * 把「用哪个模型」拆成三层：
  *   1. **预设（preset）**：厂商 + 建议 baseUrl + 建议模型 + 上下文窗口，选中即预填，省得记每个厂商的地址；
  *   2. **每预设一份配置**：apiKey / baseUrl / model / apiMode / maxContextSize / reasoning 各存一份，
  *      换预设不会把上一家的 key 弄丢；
  *   3. **任务路由（taskRouting）**：对话与编译（ingest）可以各点一个预设 ——
  *      便宜模型编译、强模型对话，或反过来。
  *
- * 与桌面端的两处差异（有意）：
+ * 两处刻意的取舍：
  *   · 多一个内置预设 `workstation`：直接用工作台的 ai.*（NewAPI + provider），出厂就能跑，不用先配 key；
  *   · **没有 CLI 传输**（claude-code / codex-cli 那类）：那要靠本机 CLI 子进程，工作台不做这条。
  *
@@ -62,7 +62,7 @@ export function cfg() {
 }
 
 /**
- * 思考档位：auto / off / low / medium / high（对齐桌面端的 reasoning effort 分档）。
+ * 思考档位：auto / off / low / medium / high（reasoning effort 分档）。
  * 老配置里只有 auto/off，其它值（含空）一律归到 auto —— 由模型自己决定。
  */
 export function normalizeReasoning(v) {
@@ -193,7 +193,7 @@ export function overview() {
   }
 }
 
-/** 连通性测试（对照桌面端的做法：发一条最小对话请求，看能不能拿回内容） */
+/** 连通性测试：发一条最小对话请求，看能不能拿回内容 */
 export async function test(id) {
   const pc = presetConfig(id ?? cfg().activePresetId)
   if (pc.preset?.provider === 'workstation' || pc.id === 'workstation') {
@@ -349,8 +349,10 @@ export function save(patch = {}) {
  *   · OpenAI 兼容线协议（绝大多数厂商）→ 直接 POST {baseUrl}/chat/completions
  *   · Anthropic messages → POST {baseUrl}/messages（x-api-key + anthropic-version）
  * 返回形状与 newapi.chat 一致：{ ok, content, usage, model, error, detail }
+ * 预算的权威在 lib/llm.mjs（BUDGET / budgetFor）：调用方**应该显式传** maxTokens，
+ * 这里的默认值只是兜底 —— 兜底给太小的话，思考模型会把正文吃成空串，而且不报错。
  */
-export async function chatOnce(r, messages, { maxTokens = 1600, temperature = 0.3, timeout = 180000 } = {}) {
+export async function chatOnce(r, messages, { maxTokens = 8000, temperature = 0.3, timeout = 180000 } = {}) {
   if (!r?.ok) return { ok: false, error: r?.error ?? '没有可用的模型配置' }
   if (r.followWorkstation) {
     const { chat } = await import('./newapi.mjs')
@@ -415,7 +417,7 @@ export function anthropicThinking(level, maxTokens) {
  *   · Anthropic messages → {baseUrl}/messages（SSE，event 分帧：thinking_delta / text_delta）
  * 返回 { ok, content, partial?, streaming:true }
  */
-export async function chatStreamVia(r, messages, { maxTokens = 1600, temperature = 0.3, timeout = 300000, signal, onDelta, onEvent } = {}) {
+export async function chatStreamVia(r, messages, { maxTokens = 8000, temperature = 0.3, timeout = 300000, signal, onDelta, onEvent } = {}) {
   if (!r?.ok) return { ok: false, error: r?.error ?? '没有可用的模型配置' }
   if (r.followWorkstation) {
     const { chatStream } = await import('./newapi.mjs')

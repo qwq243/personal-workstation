@@ -11,6 +11,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import { loadConfig, saveConfig, publicConfig, migrateScopedConfig, syncConfigMirrors, CONFIG_PATH, ROOT_DIR, SERVER_DIR, DEFAULTS } from './config.mjs'
+import { CONFIG_EDITABLE, CONFIG_EDITABLE_SCALARS } from './lib/config-editable.mjs'
 import { request, spawnHidden } from './lib/net.mjs'
 import * as pguard from './lib/pguard.mjs'
 import * as procscan from './lib/procscan.mjs'
@@ -128,7 +129,7 @@ function route(method, pattern, handler) {
 
 route('GET', /^\/api\/health$/, async () => ({
   ok: true,
-  service: 'workstation-sidecar',
+  service: 'workstation',
   version: '0.1.0',
   port: PORT,
   configPath: CONFIG_PATH,
@@ -136,7 +137,7 @@ route('GET', /^\/api\/health$/, async () => ({
 }))
 
 /** 一次给前端全部「外部世界」状态，避免首页打一堆请求。
- *  秒响应策略（2026-09-13，用户口径「尽快展示」）：
+ *  秒响应策略：
  *  1. 内存缓存 20s —— 多页切换/看板轮询瞬时返回；
  *  2. 磁盘缓存 data/cache/overview.json —— 边车重启后首屏立即有数据；
  *  3. stale-while-revalidate —— 缓存过期时**立即返回旧值**（标 stale），后台刷新供下次用，
@@ -172,8 +173,8 @@ function saveOverviewDisk() {
  * 一次给前端「外部世界」的总体状态。
  *
  * 这里的每一项都必须只依赖**本项目自带的能力**（模型端点、本地看板数据）。
- * 原来它还聚合过课表 / 待办 / 早报 / 签到 / 教务服务状态那几类数据 —— 它们的来源各自
- * 依赖校方私有接口或作者本机服务，开源版不随仓库分发，已整块摘掉；
+ * 原来它还聚合过课表 / 待办 / 早报 / 签到 / 校方服务状态那几类数据 —— 它们的来源各自
+ * 依赖特定机构的私有接口或使用者本机的服务，开源版不随仓库分发，已整块摘掉；
  * 需要的话由使用者按同样的「加一节 + 前端加一张卡」的方式自己接回来。
  */
 async function buildOverview() {
@@ -236,7 +237,7 @@ route('GET', /^\/api\/overview$/, (req, { query }) => {
   })
 })
 
-/* --- 日报汇总（自动聚合本机数据，2026-09-13 与用户对齐：日报=当天真实数据汇总，早报/复盘并列展示） --- */
+/* --- 每日汇总（按天自动汇总本机数据，每个 section 独立降级） --- */
 
 const SUMMARY_TTL = 60000
 /** date -> { at, value }；当天数据变化（学单词、花钱）最多延迟 1 分钟可见 */
@@ -247,7 +248,7 @@ function localDateStr(d = new Date()) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
-/** 单节数据源失败不影响整份日报：每个 section 都带 ok，前端按节降级 */
+/** 单节数据源失败不影响整份汇总：每个 section 都带 ok，前端按节降级 */
 async function buildDailySummary(date) {
   const isToday = date === localDateStr()
   const dayStartMs = new Date(`${date}T00:00:00`).getTime()
@@ -354,8 +355,10 @@ route('GET', /^\/api\/newapi\/snapshot$/, (req, { query }) =>
   usageCache.snapshot({ refresh: query.refresh === '1' }),
 )
 
-/* --- 工作站自身（面板） --- */
+/* --- 工作站自身（面板）。页面在「运行与自启」`#/service` --- */
 
+/** 当前这个边车进程：端口 / PID / node / 项目根 / 配置文件路径 */
+route('GET', /^\/api\/panel\/sidecar$/, () => panel.sidecarStatus())
 /** 面板自身状态 + 自启位体检（编码/路径/用的哪个 node） */
 route('GET', /^\/api\/panel\/status$/, () => panel.status())
 /** 面板的运维动作：enable 生成/修复自启位 · disable 关 · remove 删 · open-startup 打开启动文件夹 */
@@ -441,7 +444,7 @@ route('POST', /^\/api\/english\/daily\/undo$/, (req, { body }) => englishDaily.u
 /* --- 规划台（项目管理 + 备考清单 + 倒计时） --- */
 /**
  * 长期目标数据，存 server/data/plan.json，前端与智能体读写同一份 ——
- * 每日 03:00 的对话复盘可以把整理出的项目进度直接写进来，面板就自动更新。
+ * 外部脚本 / 智能体把整理出的项目进度写进来，面板就自动更新。
  * 倒计时由服务端按**本地日历日**算一份（今天 = 0），前端另有一份现算的用于跨天自增。
  */
 route('GET', /^\/api\/plan\/panel$/, () => plan.panel())
@@ -597,7 +600,7 @@ function editableDefaults() {
   }
   return {
     newapi: pick(d.newapi, ['baseUrl']),
-    ai: pick(d.ai, ['model', 'models', 'maxTokens', 'temperature', 'persona']),
+    ai: pick(d.ai, ['model', 'models', 'temperature', 'persona']),
     workstation: pick(d.workstation, ['autostartEntry', 'autostartLog']),
     pguard: pick(d.pguard, ['enabled', 'dataDir']),
     startupDir: d.startupDir,
@@ -609,6 +612,7 @@ route('GET', /^\/api\/config$/, () => ({
   config: publicConfig(),
   defaults: editableDefaults(),
   editable: CONFIG_EDITABLE,
+  editableScalars: [...CONFIG_EDITABLE_SCALARS],
   path: CONFIG_PATH,
 }))
 /**
@@ -618,43 +622,11 @@ route('GET', /^\/api\/config$/, () => ({
  * 一个手滑（或前端传了个多余字段）就能把边车配置写坏 —— 写坏之后连「打开设置页改回来」
  * 都做不到。所以逐字段过白名单，没列上的一律拒绝并在响应里点名。
  * 敏感项另有 SECRET_PATHS 与脱敏串拦截，见 config.mjs 的 saveConfig。
+ *
+ * 两张白名单（分节 / 标量）在 `server/lib/config-editable.mjs` —— 那里有「为什么分两张」
+ * 的来龙去脉，以及加新配置项要动哪几处。它们被单独放一个文件，是为了能被
+ * `scripts/tests/config-whitelist.test.mjs` 与 `DEFAULTS`、`config.example.json` 对账。
  */
-const CONFIG_EDITABLE = {
-  newapi: ['baseUrl'],
-  ai: ['model', 'models', 'maxTokens', 'temperature', 'persona', 'personaPrivate'],
-  workstation: ['autostartEntry', 'autostartLog'],
-  // 工作台自己的进程守护引擎：这里只放「开不开、数据放哪」，规则阈值在 lib/pguard.mjs 的白名单里。
-  pguard: ['enabled', 'dataDir'],
-  // 知识库：只允许换库目录与编译/检索参数（页面内容走 /api/wiki/* 那组接口，不在这里改）
-  // 全站能力（模型 / 嵌入 / 检索 / 文档解析 / 网络 / 输出）：在「设置与数据」页改
-  llm: ['activePresetId', 'configs', 'keys', 'customPresets', 'taskRouting', 'reasoning', 'maxContextSize'],
-  embedding: ['enabled', 'endpoint', 'model', 'apiKey', 'batchSize', 'concurrency', 'chunkChars', 'chunkOverlap', 'maxPages', 'outputDimensionality', 'extraHeaders'],
-  search: ['provider', 'apiKey', 'serpApiEngine', 'searXngUrl', 'searXngCategories', 'ollamaUrl', 'providerConfigs', 'defaultSource', 'maxResults', 'anyTxt'],
-  docparse: ['mineru'],
-  network: ['proxy'],
-  outputLanguage: [],
-  // 知识库自己的（强业务）：库目录、监听、队列上限
-  wiki: [
-    'dir',
-    'model',
-    'maxChars',
-    'chatMaxTokens',
-    'embedding',
-    'mineru',
-    // 模型预设 / 检索 / 输出 / 网络 / 定时导入：结构走 config.json，密钥自动落到 credentials.json
-    'llm',
-    'search',
-    'output',
-    'network',
-    'scheduledImport',
-    'watchEnabled',
-    'watchAutoIngest',
-    'watchIntervalMin',
-    'watchMaxFileSizeMb',
-    'watchDirs',
-    'watchExcludeDirs',
-  ],
-}
 
 /* --- pguard（工作台的进程守护引擎） ---
  *
@@ -808,7 +780,7 @@ route('POST', /^\/api\/wiki\/ask$/, (req, { body }) =>
   wiki.ask(String(body?.question ?? ''), { topK: Number(body?.topK) || 6, history: body?.history ?? [] }),
 )
 
-/* ---- 多库（桌面端的 projects）：切库只换当前目录，从不删文件 ---- */
+/* ---- 多库：切库只换当前目录，从不删文件 ---- */
 route('GET', /^\/api\/wiki\/projects$/, () => wiki.projects())
 route('POST', /^\/api\/wiki\/projects\/set$/, (req, { body }) => wiki.setProject(body?.dir ?? body?.id ?? ''))
 route('POST', /^\/api\/wiki\/projects\/add$/, (req, { body }) => wiki.addProject(String(body?.dir ?? ''), { name: body?.name }))
@@ -879,7 +851,7 @@ route('POST', /^\/api\/wiki\/chat\/stream$/, async (req, { body, res }) => {
   return 'handled'
 })
 
-/* ---- 入库队列 + 源目录监听（桌面端的 Ingest Queue / Source Watch） ---- */
+/* ---- 入库队列 + 源目录监听 ---- */
 route('GET', /^\/api\/wiki\/queue$/, (req, { query }) => wikiQueue.list({ limit: Number(query.limit) || 200 }))
 /**
  * 把页面里拖进来的文件落到临时目录并排队（Content-Type: application/octet-stream，文件名走 ?name=）。
@@ -989,12 +961,14 @@ route('PATCH', /^\/api\/config$/, (req, { body }) => {
   const rejected = []
   for (const [k, v] of Object.entries(patch)) {
     if (k === 'patch') continue
-    if (k === 'startupDir') {
-      clean.startupDir = String(v)
+    // 标量项（outputLanguage / startupDir）：整项是一个字符串，别走下面的分节循环 ——
+    // 那里的 `typeof v !== 'object'` 会把它们当「无效分节」拒掉（历史上真的这么拒过）。
+    if (CONFIG_EDITABLE_SCALARS.has(k)) {
+      clean[k] = typeof v === 'string' ? v : String(v ?? '')
       continue
     }
     const fields = CONFIG_EDITABLE[k]
-    if (!fields || typeof v !== 'object' || v === null) {
+    if (!fields || typeof v !== 'object' || v === null || Array.isArray(v)) {
       rejected.push(k)
       continue
     }
@@ -1115,6 +1089,10 @@ route('POST', /^\/api\/memo\/summarize\/stream$/, async (req, { body, res }) => 
   return 'handled'
 })
 
+// ↓ 新接口加在这里（路由是「注册顺序 = 匹配顺序」，第一条命中就停：
+//   更具体的 pattern 要写在更宽的**前面**；加完别忘了前端 src/core/sidecar.ts 里加一条，
+//   以及需要被智能体调用时在 server/mcp.mjs 的 TOOLS / HANDLERS 各加一条）
+
 /* --------------------------------------------------- 静态资源（生产） --- */
 
 const DIST = path.join(ROOT_DIR, 'dist')
@@ -1182,7 +1160,6 @@ function serveStatic(req, res, urlPath) {
  * 只是窗口和进程挂着），见 lib/singleton.mjs。只为放掉自己人；端口被陌生进程占着就报错退出。
  */
 async function startServer() {
-{
   const gate = await singleton.enforce({ port: PORT, log: (m) => console.log(' ' + m) })
   if (!gate.ok) {
     console.error(`[单实例闸] ${gate.error}`)
@@ -1191,152 +1168,151 @@ async function startServer() {
   if (gate.reaped.length) {
     console.log(` 单实例闸: 回收了 ${gate.reaped.filter((r) => r.killed).length} 个旧边车实例（本次只保留这一个）`)
   }
-}
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${HOST}:${PORT}`)
-  const urlPath = url.pathname
-  const query = Object.fromEntries(url.searchParams.entries())
-  const origin = req.headers.origin
+    const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url, `http://${HOST}:${PORT}`)
+    const urlPath = url.pathname
+    const query = Object.fromEntries(url.searchParams.entries())
+    const origin = req.headers.origin
 
-  // ---- 第 1 道闸：Origin 白名单 -------------------------------------------------
-  // 浏览器发起的跨源请求一定带 Origin。不是工作站自己的页面来源，直接 403：
-  // 这样别的网页连「探测端口上有什么」都做不到。
-  applyCors(req, res, origin)
-  if (origin && !auth.originAllowed(origin)) {
-    return send(res, 403, {
-      ok: false,
-      error: '来源未被允许（Origin 不在白名单）',
-      origin,
-      hint: '如需放行，改 server/config.json 的 auth.allowedOrigins',
-    })
-  }
+    // ---- 第 1 道闸：Origin 白名单 -------------------------------------------------
+    // 浏览器发起的跨源请求一定带 Origin。不是工作站自己的页面来源，直接 403：
+    // 这样别的网页连「探测端口上有什么」都做不到。
+    applyCors(req, res, origin)
+    if (origin && !auth.originAllowed(origin)) {
+      return send(res, 403, {
+        ok: false,
+        error: '来源未被允许（Origin 不在白名单）',
+        origin,
+        hint: '如需放行，改 server/config.json 的 auth.allowedOrigins',
+      })
+    }
 
-  if (req.method === 'OPTIONS') return send(res, 204, '')
+    if (req.method === 'OPTIONS') return send(res, 204, '')
 
-  // ---- 第 2 道闸：本地令牌 -----------------------------------------------------
-  // /api/auth/token 与 /api/health 免令牌；其余 /api/* 和 /mcp 必须带。
-  if (auth.needsToken(urlPath) && !auth.tokenValid(req, query)) {
-    return send(res, 401, auth.unauthorizedBody(urlPath))
-  }
+    // ---- 第 2 道闸：本地令牌 -----------------------------------------------------
+    // /api/auth/token 与 /api/health 免令牌；其余 /api/* 和 /mcp 必须带。
+    if (auth.needsToken(urlPath) && !auth.tokenValid(req, query)) {
+      return send(res, 401, auth.unauthorizedBody(urlPath))
+    }
 
-  // MCP 端点（POST=JSON-RPC，GET=SSE 保活/能力探测）
-  if (urlPath === '/mcp') {
-    const body = req.method === 'POST' ? await readBody(req) : null
-    const out = await handleMcp({ req, res, body, method: req.method, send })
-    if (out === 'handled') return
-    return send(res, 200, out ?? { ok: true })
-  }
+    // MCP 端点（POST=JSON-RPC，GET=SSE 保活/能力探测）
+    if (urlPath === '/mcp') {
+      const body = req.method === 'POST' ? await readBody(req) : null
+      const out = await handleMcp({ req, res, body, method: req.method, send })
+      if (out === 'handled') return
+      return send(res, 200, out ?? { ok: true })
+    }
 
-  for (const r of routes) {
-    if (r.method !== req.method) continue
-    const m = urlPath.match(r.pattern)
-    if (!m) continue
-    const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {}
-    // 处理器抛异常时必须自己接住：不接的话这个请求会**永远吊着**（响应发不出去，
-    // 页面一直转圈、curl 一直挂）。加流式/代理类接口时踩过一次。
-    let result
-    try {
-      result = await r.handler(req, { query, body, params: m.slice(1), res })
-    } catch (err) {
-      const msg = err?.stack ?? err?.message ?? String(err)
-      console.error(`[路由] ${req.method} ${urlPath} 抛异常：`, msg)
-      if (res.headersSent) {
-        try {
-          res.destroy()
-        } catch {
-          /* 已经在写了，断掉就好 */
+    for (const r of routes) {
+      if (r.method !== req.method) continue
+      const m = urlPath.match(r.pattern)
+      if (!m) continue
+      const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {}
+      // 处理器抛异常时必须自己接住：不接的话这个请求会**永远吊着**（响应发不出去，
+      // 页面一直转圈、curl 一直挂）。加流式/代理类接口时踩过一次。
+      let result
+      try {
+        result = await r.handler(req, { query, body, params: m.slice(1), res })
+      } catch (err) {
+        const msg = err?.stack ?? err?.message ?? String(err)
+        console.error(`[路由] ${req.method} ${urlPath} 抛异常：`, msg)
+        if (res.headersSent) {
+          try {
+            res.destroy()
+          } catch {
+            /* 已经在写了，断掉就好 */
+          }
+          return
         }
-        return
+        return send(res, 500, { ok: false, error: `接口内部出错：${err?.message ?? String(err)}`, path: urlPath })
       }
-      return send(res, 500, { ok: false, error: `接口内部出错：${err?.message ?? String(err)}`, path: urlPath })
+      if (result === 'handled') return
+      return send(res, 200, result ?? { ok: true })
     }
-    if (result === 'handled') return
-    return send(res, 200, result ?? { ok: true })
-  }
 
-  if (urlPath.startsWith('/api/')) return send(res, 404, { ok: false, error: `未知接口 ${urlPath}` })
-  return serveStatic(req, res, urlPath)
-})
+    if (urlPath.startsWith('/api/')) return send(res, 404, { ok: false, error: `未知接口 ${urlPath}` })
+    return serveStatic(req, res, urlPath)
+  })
 
-server.listen(PORT, HOST, async () => {
-  console.log(`工作站边车已启动: http://${HOST}:${PORT}`)
-  console.log(` 配置文件: ${CONFIG_PATH}`)
-  if (fs.existsSync(DIST)) console.log(` 静态页面: http://${HOST}:${PORT}/`)
-  else console.log(' 未找到 dist/，前端请用 npm run dev（5273）')
-  console.log(` MCP 端点: http://${HOST}:${PORT}/mcp`)
-  if (auth.authEnabled()) {
-    console.log(' 访问控制: 已开启（Origin 白名单 + 本地令牌）')
-    console.log(`   页面自动取令牌；MCP / 脚本调用请带 X-WS-Token，值见 ${CONFIG_PATH} 的 auth.token`)
-  } else {
-    console.log(' 访问控制: 已关闭（config.json 的 auth.enabled = false）—— 本机任何网页都能读写，慎用')
-  }
-
-  // 知识库源目录监听（默认关）：开了之后按周期扫监听目录，把新增/改过的文档排进入库队列。
-  // 自动编译（watchAutoIngest）会花模型额度，单独一个开关，默认不动手。
-  {
-    const w = wikiQueue.status()
-    if (w.enabled) {
-      wikiQueue.startScheduler()
-      console.log(
-        ` 知识库监听: 每 ${w.intervalMin} 分钟扫一次（${w.dirsResolved.join('、')}，自动编译${w.autoIngest ? '开' : '关'}）`,
-      )
+  server.listen(PORT, HOST, async () => {
+    console.log(`工作站边车已启动: http://${HOST}:${PORT}`)
+    console.log(` 配置文件: ${CONFIG_PATH}`)
+    if (fs.existsSync(DIST)) console.log(` 静态页面: http://${HOST}:${PORT}/`)
+    else console.log(' 未找到 dist/，前端请用 npm run dev（5273）')
+    console.log(` MCP 端点: http://${HOST}:${PORT}/mcp`)
+    if (auth.authEnabled()) {
+      console.log(' 访问控制: 已开启（Origin 白名单 + 本地令牌）')
+      console.log(`   页面自动取令牌；MCP / 脚本调用请带 X-WS-Token，值见 ${CONFIG_PATH} 的 auth.token`)
     } else {
-      console.log(' 知识库监听: 已关闭（页面「知识库 → 入库 → 源目录监听」里可开）')
+      console.log(' 访问控制: 已关闭（config.json 的 auth.enabled = false）—— 本机任何网页都能读写，慎用')
     }
-  }
 
-  // NewAPI 用量缓存：读落盘缓存 → 两级定时同步（轻 liveSec / 全量 fullSec）→ 立即补一轮。
-  // 模型用量页/打开即秒显缓存，不再每次现拉 NewAPI。
-  usageCache.startSync()
-  console.log(` 模型用量: 缓存同步已启动（轻 ${usageCache.LIVE_SEC}s / 全量 ${usageCache.FULL_SEC}s，环境变量 USAGE_LIVE_SEC/USAGE_FULL_SEC 可调）`)
+    // 知识库源目录监听（默认关）：开了之后按周期扫监听目录，把新增/改过的文档排进入库队列。
+    // 自动编译（watchAutoIngest）会花模型额度，单独一个开关，默认不动手。
+    {
+      const w = wikiQueue.status()
+      if (w.enabled) {
+        wikiQueue.startScheduler()
+        console.log(
+          ` 知识库监听: 每 ${w.intervalMin} 分钟扫一次（${w.dirsResolved.join('、')}，自动编译${w.autoIngest ? '开' : '关'}）`,
+        )
+      } else {
+        console.log(' 知识库监听: 已关闭（页面「知识库 → 入库 → 源目录监听」里可开）')
+      }
+    }
 
-  // overview 预热：启动 2s 后后台构建一次（结果落盘）。
-  // 这样「双击启动 → 打开页面」时首屏直接命中缓存，看板秒开。
-  setTimeout(() => {
-    console.log('[overview] 启动预热：后台构建看板数据…')
-    refreshOverview()
-  }, 2000)
+    // NewAPI 用量缓存：读落盘缓存 → 两级定时同步（轻 liveSec / 全量 fullSec）→ 立即补一轮。
+    // 模型用量页/打开即秒显缓存，不再每次现拉 NewAPI。
+    usageCache.startSync()
+    console.log(` 模型用量: 缓存同步已启动（轻 ${usageCache.LIVE_SEC}s / 全量 ${usageCache.FULL_SEC}s，环境变量 USAGE_LIVE_SEC/USAGE_FULL_SEC 可调）`)
 
-  // 进程守护引擎（pguard）：判定与动手都由边车做。
-  // 放在启动流程的**最后**、并整体 try 住 —— 它不该把前面的子系统拖下水（这个回调里
-  // 早先踩过「一步抛异常、后面整段被跳过」的坑，见 README 的启动回调那节）。
-  try {
-    const pg = pguard.start({ immediate: false })
-    const pgc = pguard.engineConfig()
-    if (pg.ok) {
-      console.log(
-        ` 进程守护: 引擎已启动（${pgc.dryRun ? '**演练模式**：只记录不动手' : '⚠ 真实执行'}，` +
-          `判定线 CPU≥${pgc.cpuGuard.triggerPercent}%/${pgc.cpuGuard.triggerSustainSeconds}s，内存每 ${pgc.memory.intervalSeconds}s 一轮）`,
-      )
+    // overview 预热：启动 2s 后后台构建一次（结果落盘）。
+    // 这样「双击启动 → 打开页面」时首屏直接命中缓存，看板秒开。
+    setTimeout(() => {
+      console.log('[overview] 启动预热：后台构建看板数据…')
+      refreshOverview()
+    }, 2000)
+
+    // 进程守护引擎（pguard）：判定与动手都由边车做。
+    // 放在启动流程的**最后**、并整体 try 住 —— 它不该把前面的子系统拖下水（这个回调里
+    // 早先踩过「一步抛异常、后面整段被跳过」的坑，见 README 的启动回调那节）。
+    try {
+      const pg = pguard.start({ immediate: false })
+      const pgc = pguard.engineConfig()
+      if (pg.ok) {
+        console.log(
+          ` 进程守护: 引擎已启动（${pgc.dryRun ? '**演练模式**：只记录不动手' : '⚠ 真实执行'}，` +
+            `判定线 CPU≥${pgc.cpuGuard.triggerPercent}%/${pgc.cpuGuard.triggerSustainSeconds}s，内存每 ${pgc.memory.intervalSeconds}s 一轮）`,
+        )
+      } else {
+        console.log(` 进程守护: 引擎没起来（${pg.error}）`)
+      }
+    } catch (err) {
+      console.error('[pguard] 引擎启动失败（不影响其它子系统）:', err.message)
+    }
+  })
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`端口 ${PORT} 已被占用。改 config.json 的 port，或先关掉旧实例。`)
     } else {
-      console.log(` 进程守护: 引擎没起来（${pg.error}）`)
+      console.error('边车启动失败：', err)
     }
-  } catch (err) {
-    console.error('[pguard] 引擎启动失败（不影响其它子系统）:', err.message)
-  }
-})
+    process.exit(1)
+  })
 
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`端口 ${PORT} 已被占用。改 config.json 的 port，或先关掉旧实例。`)
-  } else {
-    console.error('边车启动失败：', err)
-  }
-  process.exit(1)
-})
-
-process.on('uncaughtException', (err) => {
-  console.error('[uncaught]', err)
-})
-process.on('unhandledRejection', (err) => {
-  console.error('[unhandled]', err)
-})
-process.on('SIGINT', () => {
-  console.log('\n边车已停止')
-  process.exit(0)
-})
-}  // ← startServer() 的函数体到此结束（这个多余的花括号是原来 CLI 分支留下的，留着只为少改一处）
+  process.on('uncaughtException', (err) => {
+    console.error('[uncaught]', err)
+  })
+  process.on('unhandledRejection', (err) => {
+    console.error('[unhandled]', err)
+  })
+  process.on('SIGINT', () => {
+    console.log('\n边车已停止')
+    process.exit(0)
+  })
+}
 
 // 边车没有子命令：启动即常驻。要有一次性任务，单独写脚本调 lib，别塞进这个入口 ——
 // 塞进来会多一个「边车在不在跑」的状态要判断，之前那版就这么长出来的。

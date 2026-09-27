@@ -7,9 +7,9 @@
  * markdown 缓存在 parsed/ 里 —— 重跑本脚本不会重新上传 MinerU；
  * 只有新增 PDF 时才需要先跑 MinerU 批量解析。
  *
- * markdown 结构（2026-09-26 用 D1-10 验证）：
+ * markdown 结构（用一段样例验证）：
  *   # 第 1 句 / Day01 / 【第 1 句】     ← 天的边界（按你材料里的写法改这一行的正则）
- *   <原句> 【2005 Text 1】              ← 第一个 ## 之前
+ *   <原句> 【<年份> Text <序号>】        ← 第一个 ## 之前
  *   ## 【你的翻译】                      ← 留白（纸上的练习框）
  *   ## 【词汇】    token n. 代币
  *   ## 【结构划分】①… ②…
@@ -20,7 +20,7 @@
  *   1. 换行碎句会被 MinerU 误判成 `##` 小节标题（如「## 占优势的；显性的」其实是
  *      上一行 dominant 的释义续行）→ 只有**已知小节名**才算分节，其余 ## 行是正文；
  *   2. 词汇释义跨行断开 → 没解析出词头的行并回上一条词汇；
- *   3. 句尾真题出处偶尔单独成行/成节（如「## 【2007 Text3】」）→ 按行扫出来回填 source。
+ *   3. 句尾试卷出处偶尔单独成行/成节（如「## 【<年份> Text<序号>】」）→ 按行扫出来回填 source。
  *
  * 用法：node scripts/english-daily-build.mjs
  */
@@ -33,7 +33,7 @@ const DIR = path.join(ROOT, 'server', 'data', 'english', 'daily-sentence')
 const PARSED = path.join(DIR, 'parsed')
 const OUT = path.join(DIR, 'sentences.json')
 
-/** 水印 / 页眉噪音（「公众号：牛南山 整理更新」这类），出现即丢 */
+/** 水印与页眉噪音，如「公众号：××整理更新」这类，出现即丢 */
 const NOISE_RE = /(公众号|扫码|关注我们|整理更新|更多资料|独家整理)/
 const IMG_RE = /^!\[[^\]]*\]\([^)]*\)\s*$/
 /** 真正的小节标题（其余 `##` 行都是 OCR 误判的正文续行，不当分节） */
@@ -81,7 +81,7 @@ function splitSections(lines) {
   return { head, sections }
 }
 
-/** 原句行拼成一段；句尾的真题出处（【2005 Text 1】）拆成独立字段 */
+/** 原句行拼成一段；句尾的试卷出处（【2005 Text 1】）拆成独立字段 */
 function parseSentence(lines) {
   const text = cleanLines(lines).join(' ')
   const m = text.match(/^(.*?)\s*【([^【】]+)】\s*$/)
@@ -125,7 +125,7 @@ for (const f of files) {
   const md = fs.readFileSync(path.join(PARSED, f), 'utf8')
   for (const d of splitDays(md)) {
     blockCount += 1
-    // 散落的真题出处标签行（正常在句尾；OCR 偶尔拆成独立行/独立节）先摘出来
+    // 散落的试卷出处标签行（正常在句尾；OCR 偶尔拆成独立行/独立节）先摘出来
     let tagSource = ''
     const body = []
     for (const line of d.lines) {
