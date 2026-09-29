@@ -19,7 +19,9 @@
 - **长任务一律「起任务 + 轮询」**：转写、文档解析、入库编译都不在一个请求里等完（Node 默认 `requestTimeout` 是 5 分钟）。
 - **「没配 = 不显示」是内核约定**：模块的 `visible()` 在依赖的目录 / 端点没填时返回 false，它就从侧边栏消失，而不是点进去看一页报错（`src/core/appconfig.ts`）。
 - **配置分层**：非敏感配置与密钥分两个文件放，密钥由 `SECRET_PATHS` 自动分流，仓库里只提交带说明的模板。
-- **给智能体留了入口**：边车上挂了一个 MCP（JSON-RPC 子集，`/mcp`），45 个工具覆盖看板、规划台、词单、知识库、语音随记（含热词库）、进程与端口查询。
+- **给智能体留了入口**：边车上挂了一个 MCP（JSON-RPC 子集，`/mcp`），54 个工具覆盖看板、规划台、词单、做题本、知识库、资讯、语音随记（含热词库）、进程与端口查询。
+- **导航、主题、手机档都是内核决定**：大模块分组（本机 / 日常 / 学习 / 智能体 / 工具）在 `src/core/types.ts`，**只有叶子页面能置顶**（判据收在 `src/core/leaf-pages.ts` 一份），主题四档（按时间自动 / 浅色 / 深色 / 跟随系统）在 `src/core/ui.ts`，手机档（≤760px）把侧边栏变抽屉、宽表变卡片。
+- **四条真机门禁**：`check:pages`（页面宽度，挂在 `build` 前）/ `check:nav`（侧边栏箭头与图钉互补、图标真渲染）/ `check:mobile`（390px 视口逐页查横向溢出）/ `check:dark`（暗色亮斑）`check:theme`（主题四档真鼠标点）/ `check:ai-ui`（AI 界面收口）。它们要跑起边车与页面才能测，所以不进 CI，改样式时手动跑（见 [docs/verifying.md](docs/verifying.md)）。
 
 ## 架构一览
 
@@ -140,6 +142,16 @@ npm run dev:all    # 一条命令起两个：边车（后台）+ Vite（前台�
 > 2. 建一个 `.env.local`，写 `VITE_SIDECAR_URL=http://127.0.0.1:5278`（长期）。
 
 **开机自启**（Windows 专有，桌面双击那条路）：`npm run autostart:on` 开、`npm run autostart:off` 关、`node scripts/panel-autostart.mjs status` 只体检 —— 都要求边车已经在跑，页面入口是「运行与自启」`#/service`。
+
+### 可选件（不装也能跑）
+
+| 想要什么 | 装/配什么 | 不装会怎样 |
+|---|---|---|
+| 朗读（每日一句整句合成） | [tools/edge-tts](tools/edge-tts/README.md) + 配置 `tts.dir` | 回落浏览器自带朗读 |
+| 语音随记 | 任一 OpenAI 兼容的 `/audio/transcriptions` 端点（`asr.baseUrl`） | 该模块**不出现在侧边栏** |
+| 资讯 | 一个采集器产物目录（`collector.dir`，示例：`scripts/collector-skeleton.mjs`） | 该模块**不出现在侧边栏** |
+| 做题本导出 PDF | 本机 Chrome 或 Edge | 页面照常，导出会回一句「本机没找到 Chrome / Edge」 |
+| 知识库 | `wiki.dir` 指到一个库目录 | 该模块不出现在侧边栏 |
 
 ### 端口
 
@@ -263,8 +275,10 @@ workstation-oss/
 ├─ src/
 │  ├─ main.ts                  注册模块 → 建路由 → 图标白名单 → 挂载
 │  ├─ App.vue                  ConfigProvider（中文 locale）+ AppShell + router-view
-│  ├─ core/                    registry.ts（注册表）· types.ts（模块接口）· appconfig.ts
-│  │                           storage.ts（localStorage）· ui.ts（主题/侧栏）· sidecar.ts（API 客户端）
+│  ├─ core/                    registry.ts（注册表）· types.ts（模块接口 + 大模块分组）· appconfig.ts
+│  │                           leaf-pages.ts（导航树：叶子页面与置顶的唯一判据）· polling.ts（统一轮询）
+│  │                           storage.ts（localStorage）· ui.ts（主题四档/侧栏/手机档）· sidecar.ts（API 客户端）
+│  ├─ ai/                      统一 AI 套件：AiChat.vue · AiThoughts.vue · adapt.ts · model.ts（见 docs/ai-ui.md）
 │  ├─ router/index.ts          路由派生 + chunk 失效自愈重载
 │  ├─ shell/AppShell.vue       侧边栏（大模块归组）+ 顶栏 + 二级导航
 │  ├─ components/              PageHeader · EmptyState · MdLite · SidecarOffline · SentencePractice
@@ -272,12 +286,14 @@ workstation-oss/
 │  ├─ features/                功能模块，一个目录一个模块
 │  │  ├─ index.ts              ★ 总装配处：registerModule 全在这里（有 `// ↓ 新模块 import / 下一个功能` 锚点）
 │  │  ├─ _template/            ★ 功能模板（**不在注册表里**，不是功能）；也是 new-feature.mjs 的输入
-│  │  ├─ dashboard/            每日看板（今日 / 趋势 / AI 三页）
+│  │  ├─ dashboard/            每日看板（今日 / 趋势 / AI 三页；今日页带「本周一览」与每日一句）
 │  │  ├─ office/               日历日程 · 模型用量
 │  │  ├─ plan/                 规划台
+│  │  ├─ zuotiben/             做题本（一题一卡 + 一题一页打印/导出 PDF；另带英语「每日一句」那本）
 │  │  ├─ vocab/                英语学习（每日一句 + 单词，含 srs.ts / parser.ts / engine.ts）
 │  │  ├─ wiki/                 知识库（工作区 + 5 个 panel + 问答 + 入库 + 设置）
-│  │  ├─ memo/                 语音随记
+│  │  ├─ news/                 资讯（读采集器产物：AI 事件卡 / 批次轮播 / 时间线 / 案卷 / 反馈调教）
+│  │  ├─ memo/                 语音随记（转写 / 记录 / 配置 三子页）
 │  │  ├─ guard/                进程守护（概览 / 进程 / 参数 / 名单 / 日志 / 端口 / 智能体）
 │  │  ├─ service/              运行与自启（边车状态 + 开机自启位；一个模块只占一个页面 + 一条接口，可当范本抄）
 │  │  └─ settings/             LlmSection · EmbeddingSection · SearchSection（**不是模块**，只被设置页引用）
@@ -291,8 +307,12 @@ workstation-oss/
 │  ├─ mcp.mjs                  MCP 工具表（TOOLS / HANDLERS）+ JSON-RPC 子集
 │  ├─ lib/                     能力库，一件事一个文件（见下表）
 │  └─ data/                    本机数据（只提交 7 个示例文件）
+├─ tools/edge-tts/             可选的朗读工具（say.py + 装法说明；不装则朗读回落浏览器）
 ├─ scripts/                    start.mjs · dev-all.mjs · seed-demo-data.mjs
 │  │                            parser-parity.mjs · pguard-smoke.mjs
+│  │                            collector-skeleton.mjs（最小示例采集器：抓两个公开 RSS）
+│  │                            check-page-width.mjs · check-nav.cjs · check-mobile.cjs ·
+│  │                            check-dark.cjs · check-theme.cjs · check-ai-ui.mjs · math-typeset-check.mjs
 │  ├─ new-feature.mjs          ★ 生成一个功能模块骨架（注册 / 图标 / 接口 / 配置一起改好）
 │  ├─ panel-autostart.mjs      自启位的命令行开关（`#/service` 那一页的无界面版）
 │  ├─ lib/feature-scan.mjs     扫描 src/features 的静态解析（生成器与契约测试共用）
@@ -335,22 +355,27 @@ workstation-oss/
 
 | 模块 | 入口 | 干什么 | 需要配什么 |
 |---|---|---|---|
-| **每日看板** | `#/dashboard` | 今天的计划 / 记录 / 心情 / 复盘 + 连续记录天数 + AI 总结卡（按天存档）+ 近 7 天 | 模型端点（AI 卡用，不配也能记） |
-| **日历日程** | `#/office/calendar` | 月 / 周视图：哪天放假、第几教学周、哪天有记录 | 校历文件（见 [docs/校历格式.md](docs/校历格式.md)） |
-| **模型用量** | `#/office/usage` | 余额、今日花费、按模型 / 密钥的分布、请求日志（走缓存，打开秒显） | `newapi.baseUrl` + 令牌 |
-| **规划台** | `#/plan` | 关键日期倒计时 + 项目与下一步 + 备考清单 | 无（出厂空态） |
-| **英语学习** | `#/vocab` | 每日一句（写翻译 → 核对 → 自评打卡）+ 单词（词单 / 练习 / 错题本 / 训练计划，SuperMemo-2） | 句库要自己导（见 [docs/每日一句导入.md](docs/每日一句导入.md)） |
-| **知识库** | `#/wiki` | 抓链接 / 拖文件 → 队列 → 编译成互链页面；语义检索、双链图谱、会话问答、结构体检 | `wiki.dir`（**没配就不显示**） |
-| **语音随记** | `#/memo` | 传一段录音 → 转写 → 自动起标题写摘要 → 落成一条记录；带口述/访谈两套骨架、热词库（纠错 + 标签）、原始音频回放 | `asr.baseUrl`（**没配就不显示**） |
-| **进程守护** | `#/process-guard` | 按 CPU 阈值释放开发工具内存、结束失控进程、定时回收；另带端口与智能体视图。**出厂演练模式：只记录不动手** | 无 |
-| **运行与自启** | `#/service` | 边车自己的状态（端口 / PID / node / 入口）＋ 开机自启位体检（编码 / 路径 / 用的哪个 node）与开启 / 关闭 / 删除 | 无（Windows 才用得上，见「环境要求」） |
+| 模块 | 分组 | 入口 | 干什么 | 需要配什么 |
+|---|---|---|---|---|
+| **每日看板** | 日常 | `#/dashboard` | 今天的计划 / 记录 + 「本周一览」+ 每日一句 + AI 总结卡（按天存档）+ 近 7 天 | 模型端点（AI 卡用，不配也能记） |
+| **日历日程** | 日常 | `#/office/calendar` | 月 / 周视图：哪天放假、第几教学周、哪天有记录 | 校历文件（见 [docs/校历格式.md](docs/校历格式.md)） |
+| **规划台** | 日常 | `#/plan` | 关键日期倒计时 + 项目与下一步 + 备考清单 | 无（出厂空态） |
+| **做题本** | 学习 | `#/zuotiben` | 每日一题：一题一卡（对/错、留白处出答案解析）+ 一题一页 A4 打印、**服务端真出 PDF**；另有英语「每日一句」那本 | 打印/导出要本机有 Chrome 或 Edge |
+| **英语学习** | 学习 | `#/vocab` | 每日一句（写翻译 → 核对 → 自评打卡）+ 单词（词单 / 练习 / 错题本 / 训练计划，SuperMemo-2） | 句库要自己导（见 [docs/每日一句导入.md](docs/每日一句导入.md)） |
+| **知识库** | 学习 | `#/wiki` | 抓链接 / 拖文件 → 队列 → 编译成互链页面；语义检索、双链图谱、会话问答、结构体检 | `wiki.dir`（**没配就不显示**） |
+| **资讯** | 学习 | `#/news` | 采集器产物 → AI 事件卡 + 批次轮播 + 关注时间线 + 案卷溯源 + 反馈调教 | `collector.dir`（**没配就不显示**；见 [docs/news-contract.md](docs/news-contract.md)） |
+| **模型用量** | 智能体 | `#/office/usage` | 余额、今日花费、按模型 / 密钥的分布、请求日志（走缓存，打开秒显） | `newapi.baseUrl` + 令牌 |
+| **语音随记** | 工具 | `#/memo` | 传一段录音 → 转写 → 自动起标题写摘要 → 落成记录；三子页（转写 / 记录 / 配置），带热词库与原始音频回放 | `asr.baseUrl`（**没配就不显示**） |
+| **进程守护** | 本机 | `#/process-guard` | 按 CPU 阈值释放开发工具内存、结束失控进程、定时回收；另带端口与智能体视图。**出厂演练模式：只记录不动手** | 无 |
+| **运行与自启** | 本机 | `#/service` | 边车自己的状态（端口 / PID / node / 入口）＋ 开机自启位体检（编码 / 路径 / 用的哪个 node）与开启 / 关闭 / 删除 | 无（Windows 才用得上，见「环境要求」） |
 
 > 「运行与自启」也有命令行版（装机器、无界面场景更顺）：`npm run autostart:on` / `npm run autostart:off`，
 > 或者 `node scripts/panel-autostart.mjs status`（只读体检）。它们都要求边车已经在跑。
 
 两点补充：
 
-- **分组与置顶**：侧边栏按 `MODULE_GROUPS`（成长 / 办公 / 学习 / 待办 / 校内）归组，空组不渲染；`category` 留空的模块固定在导航最上方（当前是「进程守护」与「运行与自启」）。模块自己的二级菜单来自它路由里带 `meta.title` 且没标 `meta.hideInNav` 的项。
+- **分组与置顶**：侧边栏按 `MODULE_GROUPS`（本机 / 日常 / 学习 / 智能体 / 工具）归组，空组不渲染；`category` 现在是**必填**（不填会从导航里静默消失，`registry.ts` 有启动告警）。
+  模块自己的二级菜单来自它路由里带 `meta.title` 且没标 `meta.hideInNav` 的项；**只有叶子页面（没有展开箭头的行）能置顶**，判据在 `src/core/leaf-pages.ts` 一处，`RECOMMENDED_PINS` 只是「从没点过置顶」时的默认值（设置页有「用推荐置顶 / 清空」）。
 - **看板是容器，不是功能全集**：看板保留的是存储模型（`server/lib/dashboard.mjs`）+ AI 总结卡（`server/lib/summaries.mjs`）+ 卡片位。想加自己的卡：后端往 `/api/overview` 的返回里加一节（或另开 `/api/*`），前端在 `src/features/dashboard/DashboardHome.vue` 里加一张卡，写法照现有卡片抄。
 
 ## MCP 接入
@@ -362,7 +387,7 @@ workstation-oss/
 - **令牌**：`/mcp` 要带 `X-WS-Token: <server/config.json 的 auth.token>`；也认 `Authorization: Bearer <token>`
   与 `?token=<token>` 三种写法（`server/lib/auth.mjs`）。所以能自定义请求头的 MCP 客户端直接把令牌配成头；
   只能填 URL 的客户端就把 `?token=` 挂在端点后面。
-- **工具表**：45 个（`server/mcp.mjs` 的 `TOOLS`），覆盖看板、规划台、词单、知识库、语音随记（含热词库增删改），以及进程 / 端口的只读速查。
+- **工具表**：54 个（`server/mcp.mjs` 的 `TOOLS`），覆盖看板、规划台、词单、**做题本**（灌题 `add_problems`、作答总结 `get_problem_review`、推荐同类题 `suggest_problems` 等 9 个）、知识库、语音随记（含热词库增删改），以及进程 / 端口的只读速查。
   进程守护引擎的开关与规则**没有**开放成工具（只在页面里调）。
 
 手工验证一条（令牌换成你自己的）：
@@ -381,12 +406,15 @@ curl -s -X POST http://127.0.0.1:5278/mcp \
 - [docs/TOP-DESIGN.md](docs/TOP-DESIGN.md) —— **顶层设计**：分层、单一事实源、复用声明机制、债务台账、文案与注释规约、性能基线
 - [docs/EXTENDING.md](docs/EXTENDING.md) —— **上手扩展指南**：内核概念、加页面模块 / 加边车接口的完整步骤、数据与长任务约定、别这么做的坑
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) —— 架构：分层与数据流、一次请求的完整链路、鉴权握手、边车的启动与生命周期、单实例与自启、取舍与已知限制
-- [docs/FEATURES.md](docs/FEATURES.md) —— 功能清单：注册了哪些模块、内核自带页面、边车能力清单、MCP 工具（45 个）、外部依赖清单、命令一览，以及**本开源版移除 / 泛化了什么**
+- [docs/FEATURES.md](docs/FEATURES.md) —— 功能清单：注册了哪些模块、内核自带页面、边车能力清单、MCP 工具（54 个）、外部依赖清单、命令一览，以及**本开源版移除 / 泛化了什么**
 - [docs/CONFIG.md](docs/CONFIG.md) —— 配置与凭据：四个位置、读写机制（合并 / 脱敏 / 只写差异）、`DEFAULTS` 逐项、页面上能改什么（白名单）、环境变量、改端口、关鉴权与换令牌
 - [docs/PRIVACY.md](docs/PRIVACY.md) —— 脱敏说明：哪六类东西不该进仓库、复查方法（字面量 + 模式扫描）、待办清单
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) —— 性能盘点：已知慢点与首屏体积，按收益排的改进计划
 - [docs/design-system.md](docs/design-system.md) —— 颜色、字体、间距、组件约定（唯一配色源是 `src/styles/tokens.css`）
 - [docs/verifying.md](docs/verifying.md) —— 改完怎么验，哪几块要额外看一眼
+- [docs/news-contract.md](docs/news-contract.md) —— **资讯采集契约**：采集器要产出哪些文件、字段长什么样、最小示例怎么跑
+- [docs/zuotiben-import.md](docs/zuotiben-import.md) —— **题库池导入格式**：试题册 / 解析册怎么摆才能被解析器按章切开
+- [docs/ai-ui.md](docs/ai-ui.md) —— **AI 界面规约**：所有 AI 对话界面走 `src/ai/`，以及 `check:ai-ui` 拦什么
 - [docs/校历格式.md](docs/校历格式.md) —— 校历文件怎么写、换学年改哪个文件
 - [docs/每日一句导入.md](docs/每日一句导入.md) —— 自己买课之后怎么把句库转成能读的格式
 - [docs/文件传输.md](docs/文件传输.md) —— 想接 WebDAV / S3 / rclone 时该实现哪些函数
@@ -394,6 +422,21 @@ curl -s -X POST http://127.0.0.1:5278/mcp \
 - [`LICENSE`](LICENSE) · [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) —— 本项目许可（MIT）与第三方来源清单（含唯一的来源待确认项：品牌图）
 
 ## 常见问题
+
+**Q：侧边栏里没有「知识库 / 资讯 / 语音随记」？**
+它们走「没配 = 不显示」（`src/core/appconfig.ts`）：`wiki.dir` / `collector.dir` / `asr.baseUrl` 没填时模块不出现在导航里，填上（设置页或 `server/config.json`）并刷新即出现。这是有意的 —— 与其点进去看一页报错，不如先不出现。
+
+**Q：资讯页能不能自己抓新闻？**
+能，但采集器不随仓库分发（各人的源清单、代理、要不要真浏览器都不一样）。契约在 [docs/news-contract.md](docs/news-contract.md)，仓库里带了一个零依赖的最小示例：`node scripts/collector-skeleton.mjs <产物目录>` 抓两个公开 RSS，然后把那个目录填进 `collector.dir`。
+
+**Q：做题本里的题从哪来？**
+题目由**智能体灌进来**（MCP 的 `add_problems`），或者你在页面上手动加。「按章推荐同类题」需要题库池：题干与解析**不随仓库分发**（那是版权材料），自己买书后按 [docs/zuotiben-import.md](docs/zuotiben-import.md) 做成两份 markdown，再把路径填进配置 `zuotiben.pool`。
+
+**Q：朗读按钮没声音 / 报「还没配朗读工具目录」？**
+朗读（每日一句整句合成）是可选增强：上游是 edge-tts，要 Python 环境。见 [tools/edge-tts/README.md](tools/edge-tts/README.md)；不装的话页面会回落浏览器自带的朗读。
+
+**Q：手机上看排版乱？**
+先跑 `npm run check:mobile`（需要边车与页面在跑，`WS_BASE` 可指到别处）：它是拿真 Chrome 在 390px 视口逐页量横向溢出的门禁，报了哪一页、哪个元素都写在输出里。
 
 **Q：页面报「连不上边车服务」，或者某个页面显示一张「本地边车服务没有连上」的卡片？**
 边车没在跑（或者跑在别的端口）。那张卡片就是为此准备的（`src/components/SidecarOffline.vue`）：上面写着启动命令，还有「重新检测」按钮。手动确认：浏览器打开 <http://127.0.0.1:5278/api/health> 应该回 `{"ok":true,...}`；命令行 `npm run server` 或双击 `启动工作站.cmd`。边车不在时前端不会白屏 —— 调用一律返回 `{ ok:false }`，由页面自己显示引导。

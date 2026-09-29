@@ -1,6 +1,6 @@
 {
   "name": "workstation-oss",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "个人工作站（开源副本）—— 可扩展的多功能学习 / 效率台",
@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run check:pages && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "server": "node server/index.mjs",
@@ -21,7 +21,17 @@
     "demo:seed": "node scripts/seed-demo-data.mjs",
     "demo:reset": "node scripts/seed-demo-data.mjs --reset",
     "autostart:on": "node scripts/panel-autostart.mjs enable",
-    "autostart:off": "node scripts/panel-autostart.mjs disable"
+    "autostart:off": "node scripts/panel-autostart.mjs disable",
+    "check:pages": "node scripts/check-page-width.mjs",
+    "check:nav": "node scripts/check-nav.cjs",
+    "check:nav:shots": "node scripts/check-nav.cjs --shots",
+    "check:mobile": "node scripts/check-mobile.cjs",
+    "check:mobile:shots": "node scripts/check-mobile.cjs --shots",
+    "check:dark": "node scripts/check-dark.cjs",
+    "check:dark:shots": "node scripts/check-dark.cjs --shots",
+    "check:theme": "node scripts/check-theme.cjs",
+    "check:ai-ui": "node scripts/check-ai-ui.mjs",
+    "test:math": "node --experimental-strip-types scripts/math-typeset-check.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "2.3.2",
@@ -29,6 +39,7 @@
     "katex": "^0.16.47",
     "pinia": "3.0.4",
     "vue": "3.5.42",
+    "vue-element-plus-x": "^2.0.3",
     "vue-router": "4.6.4"
   },
   "devDependencies": {

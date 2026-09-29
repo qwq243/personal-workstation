@@ -12,6 +12,7 @@ export const guardModule: WorkstationModule = {
   description: '按 CPU 阈值释放开发工具内存、结束失控进程，并定时回收内存；出厂演练模式，只记录不动手。另带端口与智能体两个视图。',
   icon: 'Timer',
   color: '#d97706',
+  category: 'local',
   order: 7,
   homePath: '/process-guard',
   routes: [

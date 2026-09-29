@@ -1,0 +1,331 @@
+/**
+ * 打印纸面共用版式 —— 「一页一份」的 A4 纸、答案页与打印时的外壳覆盖。
+ *
+ * 两份册子共用：数学 `ZuotibenPrint.vue`（一题一页）与英语 `SentenceBookPrint.vue`（一句一页）。
+ * 2026-09-29 从这里原来那份（ZuotibenPrint 的 scoped 样式 + 一段不带 scoped 的打印覆盖）抽出来，
+ * 抽的理由是**打印 CSS 里那几处必须盖掉外壳**的写法很容易被忘记：
+ *   `.main` 是 `height: 100vh`、`.content` 是 `overflow-y: auto` —— 不盖掉只会打出可见那一屏。
+ *
+ * ⚠️ 这份是全局 CSS（靠 `ztb-page` / `ztb-sheet` / `ztb-print` 这几个前缀隔离），
+ * 别在里面写某个页面独有的块。
+ */
+
+.ztb-print {
+  padding: 16px 18px 40px;
+}
+.ztb-print__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.ztb-print__tip {
+  font-size: 12.5px;
+  color: var(--ws-text-2, #6b7280);
+}
+
+/* 屏幕上：白纸居中显示，A4 比例；窗口比 A4 窄时整体缩下来（打印时下面那段会改回铺满） */
+.ztb-page {
+  width: 210mm;
+  max-width: 100%;
+  min-height: 297mm;
+  margin: 0 auto 18px;
+  padding: 14mm 14mm 10mm;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+/* 横向：屏幕预览也换成横纸（297×210），不然看不出实际长什么样 */
+.ztb-print.is-landscape .ztb-page,
+.ztb-print.is-landscape .ztb-sheet {
+  width: 297mm;
+}
+.ztb-print.is-landscape .ztb-page {
+  min-height: 210mm;
+  padding: 12mm 14mm 8mm;
+}
+/* 答案汇总 / 详解：按内容自然分页，不锁 A4 高度 */
+.ztb-sheet {
+  width: 210mm;
+  max-width: 100%;
+  margin: 0 auto 18px;
+  padding: 14mm 14mm 10mm;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
+  box-sizing: border-box;
+}
+.ztb-page__head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #374151;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #d1d5db;
+  margin-bottom: 12px;
+}
+.ztb-page__body {
+  flex: 0 0 auto;
+  font-size: 15px;
+  line-height: 1.95;
+  color: #111;
+}
+/* 行内模式的公式在纸面上抬一点（2026-09-29）：纯公式题（lim 分式填空那种）整题都是
+   行内公式，按 LaTeX 行内规则排出来偏小、打印后费眼；块级公式（.katex-display）保持原大。 */
+.ztb-page__body .katex,
+.ztb-sheet .katex {
+  font-size: 1.06em;
+}
+.ztb-page__body .katex-display .katex,
+.ztb-sheet .katex-display .katex {
+  font-size: 1em;
+}
+.ztb-page__no {
+  font-weight: 700;
+  margin-right: 2px;
+}
+.ztb-page__origin {
+  margin-left: 4px;
+}
+.ztb-page__text {
+  display: inline;
+}
+.ztb-page__opts {
+  margin-top: 8px;
+  padding-left: 22px;
+}
+.ztb-page__opt {
+  margin: 2px 0;
+}
+/* 手写区：把剩下的整页吃掉（照参照物，是纯白，不画线） */
+.ztb-page__blank {
+  flex: 1 1 auto;
+  min-height: 40mm;
+}
+/* 含解析时才出现：印在留白之后，不挤手写的位置 */
+.ztb-page__solution {
+  margin-top: 6mm;
+  padding-top: 3mm;
+  border-top: 1px solid #d1d5db;
+  font-size: 13.5px;
+  line-height: 1.85;
+  color: #111;
+}
+.ztb-page__solution b {
+  margin-right: 6px;
+}
+.ztb-page__note {
+  margin-top: 2mm;
+  color: #92400e;
+}
+.ztb-page__foot {
+  text-align: right;
+  font-size: 12px;
+  color: #6b7280;
+  padding-top: 4px;
+}
+
+/* ---------------------------------------------- 答案区的排法（后置格式）--- */
+.ztb-sheet__title {
+  font-size: 17px;
+  margin: 0 0 10px;
+  letter-spacing: 2px;
+}
+.ztb-sheet__answers {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px 16px;
+  font-size: 15px;
+  line-height: 2;
+}
+.ztb-sheet__answers li {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  border-bottom: 1px dotted #e5e7eb;
+  padding-bottom: 2px;
+}
+.ztb-sheet__no {
+  font-weight: 700;
+}
+.ztb-sheet__tag {
+  color: #9ca3af;
+  font-size: 12px;
+}
+.ztb-sheet__ans {
+  margin-left: auto;
+}
+.ztb-sheet__item {
+  /* 一题不跨页：解析被腰斩最难读 */
+  break-inside: avoid;
+  page-break-inside: avoid;
+  padding: 8px 0 10px;
+  border-top: 1px solid #e5e7eb;
+  font-size: 14px;
+  line-height: 1.9;
+  color: #111;
+}
+.ztb-sheet__item:first-of-type {
+  border-top: 0;
+}
+.ztb-sheet__qhead {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+.ztb-sheet__ans-inline {
+  background: #eef2ff;
+  color: #4338ca;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.ztb-sheet__stem {
+  font-size: 14.5px;
+  line-height: 1.9;
+}
+.ztb-sheet__sol {
+  margin-top: 4px;
+}
+.ztb-sheet__topic {
+  background: #f3f4f6;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+/* 溯源：写在详解末尾，回查原文用（哪个文件、哪一章） */
+.ztb-sheet__src {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: #9ca3af;
+  word-break: break-all;
+}
+/* 译文/结构这类分段小标题（英语册用）：纸面上要能看出是哪一段 */
+.ztb-sheet__label {
+  font-weight: 700;
+  color: #4338ca;
+  margin-right: 5px;
+}
+.ztb-sheet__pre {
+  font-size: 13px;
+  line-height: 1.85;
+  white-space: pre-line;
+  color: #1f2937;
+}
+
+/* ------------------------------------------------ 打印时（不带 scoped）--- */
+@page {
+  margin: 12mm 14mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  /* 外壳：侧边栏与顶栏不出现在纸上 */
+  .shell {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    background: #fff !important;
+    background-image: none !important;
+  }
+  .sidebar,
+  .topbar {
+    display: none !important;
+  }
+  /* 关键：.main 是 100vh、.content 是 overflow-y:auto，不盖掉就只能打出可见那一屏 */
+  .main {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .content {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+  }
+  .ztb-print {
+    padding: 0 !important;
+  }
+  .ztb-print__toolbar {
+    display: none !important;
+  }
+  /* 一页一份。
+   * 每页高度与纸张方向**不在这里写死** —— 它们随「横向/纵向」变，而 @page 不认 CSS 变量，
+   * 所以由脚本按当前方向拼一段样式挂到 head 上（见 print-page.ts 的 sheetPageCss）。这里只负责断页。 */
+  .ztb-page {
+    width: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    break-after: page;
+    page-break-after: always;
+  }
+  /*
+   * 最后一份后面别再断页：断页符会把「下一页」也生成出来，
+   * 于是纯题面纸凭空多一张空白尾页（实测 13 题打出 14 页）。
+   * 「答案在后」那种格式里，末尾还有答案页，所以这条不该命中 —— 正好，
+   * 那时 .ztb-page 不是容器的 :last-child。
+   */
+  .ztb-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  /* 答案汇总页：独占一页，后面接详解 */
+  .ztb-sheet {
+    width: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+  .ztb-sheet--answers {
+    break-after: page;
+    page-break-after: always;
+  }
+  /*
+   * 一条详解独占一页：用户要「答案超出一页就单独拎出来一页专门陈列」。
+   * flow 模式下只对特别长的翻页（ownPage），page 模式全都翻。
+   */
+  .ztb-sheet__item.is-own-page {
+    break-before: page;
+    page-break-before: always;
+    /* 独占一页时，长解析允许跨页（硬卡不跨反而会被裁掉），但仍然尽量不腰斩 */
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+}
+
+/* ------------------------------------------------- 手机档（屏幕，不是打印）---
+   打印工具栏一行塞了 10 个控件（Day 区间、方向、格式、答案排版、打印…），
+   手机上会换成一堆 24px 高的小控件、还排得参差。2026-09-29：
+   允许换行 + 抬到 30px，提示文字独占一行。 */
+@media screen and (max-width: 760px) {
+  .ztb-print__toolbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .ztb-print__toolbar .el-button,
+  .ztb-print__toolbar .el-checkbox,
+  .ztb-print__toolbar .el-radio-button__inner {
+    min-height: 30px;
+  }
+  .ztb-print__toolbar .ztb-print__tip {
+    flex: 1 1 100%;
+  }
+}

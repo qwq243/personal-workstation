@@ -76,17 +76,43 @@ button {
   background-clip: content-box;
 }
 
-/* ------------------------------------------------------- 工具 / 原子类 -- */
+/* ------------------------------------------------------- 页面容器（宽度）--
+   页面宽度是**全站的一个决定**，不是每页各自的口味。
+   原来的 1120 / 1320 居中在 2560 屏上左右白留 240~340px（用户 2026-09-27 点名
+   「每次新建页面，左右的宽度总留得很宽」）；但顶到两边也不好看 —— 用户同一天补的
+   第二句是「不是一点缝隙都没有，要留合理的空间」。
+   所以宽度 = `--ws-page-max`（tokens.css，默认 1680px）居中：宽屏上左右各留几十 px，
+   小窗口下自然铺满。**宽度只由这一个变量决定。**
+
+   规矩（新页面照着来，别自己发挥）：
+     · 页面根容器一律 `.ws-page`（知识库的是 `.wk-page`）；**不要再写 max-width**；
+     · 真要窄栏的（聊天、单卡练习这类整页只干一件事的），用 `.ws-page--narrow`，
+       它是全站唯一的窄栏出口；
+     · `.ws-page--wide` 是历史别名（宽度统一后与 `.ws-page` 没有差别），新页面别再写。
+
+   防回归：`npm run check:pages`（`npm run build` 前自动跑）会拦下没写理由的宽幅
+   max-width —— 要保留就得在那一行附近注明「page-narrow: 理由」这样的注释。
+   注意：**注释里不要再写注释符号**（写一整对斜杠星号会把本段提前结束，
+   后面第一条规则会被解析器整条丢掉 —— 2026-09-27 就是这儿把 .ws-page 丢过一次）。 */
 .ws-page {
-  max-width: 1120px;
+  width: 100%;
+  min-width: 0;
+  max-width: var(--ws-page-max);
   margin: 0 auto;
   padding: 28px 32px 72px;
 }
 
-.ws-page--wide {
-  max-width: 1320px;
+/* 窄栏（960px）：全站唯一的「把页面收窄」出口，别的宽度一律不许自己写 */
+.ws-page--narrow {
+  max-width: 960px; /* page-narrow: 唯一窄栏档，全站就这一处 */
 }
 
+/* 历史别名：老页面写的是 `.ws-page--wide`（那时默认 1120、宽档 1320）。宽度现已统一 */
+.ws-page--wide {
+  max-width: var(--ws-page-max);
+}
+
+/* ------------------------------------------------------- 工具 / 原子类 -- */
 .ws-page-head {
   display: flex;
   align-items: flex-start;
@@ -179,4 +205,437 @@ button {
 
 .el-button {
   font-weight: 500;
+}
+
+/* --------------------------------- vue-element-plus-x 的暗色缺口（AI 套件用）----
+   这个库的样式**大体**是「--elx-* 从 --el-* 映射」出来的，所以自动继承我们的主题 ——
+   但有两处不吃（2026-09-27 装完实测出来的）：
+     · Welcome 的 filled 变体走变量 --elx-welcome-filled-bg，库里没给暗色取值 → 浅蓝底
+     · Prompts 的每一项是**硬编码** #fff + #f0f0f0 边框 → 暗色下一片纯白
+   都在暗色下露白，而且面积不小（Welcome 394×126、每个建议卡片 146×165）。
+
+   用 html[data-theme='dark'] 前缀而不是只改变量：库的样式在懒加载 chunk 里、
+   加载顺序在 index.css 之后，同优先级会被它盖掉；加一个类型选择器就稳赢加载顺序。
+   只在暗色下生效 —— 亮色下库的原样式是对的，别动。 */
+/* 选择器要与库里的**逐字对齐**才盖得住。产物里它们的真实形式是：
+     .elx-welcome.elx-welcome--filled[data-v-x]     → (0,3,0)
+     .elx-prompts .elx-prompts__item[data-v-x]      → (0,3,0)
+   我第一版按 .elx-prompts__item[data-v-x]（0,2,0）写、加了 html 前缀只有 (0,2,1)，
+   **盖不住，页面照旧白底**。这里按 (0,3,1) 写。
+   教训：覆盖库组件之前先把产物里的选择器 grep 出来，别照源 CSS 或文档猜。 */
+html[data-theme='dark'] .elx-welcome.elx-welcome--filled,
+html[data-theme='dark'] .elx-welcome.elx-welcome--borderless {
+  /* 库只在浅色档定义了这个变量（#e6f4ff），没有暗色取值 —— 两处都改：变量给后续继承用，
+     属性直接兜住这一处 */
+  --elx-welcome-filled-bg: var(--ws-panel-2);
+  --elx-welcome-filled-border: var(--ws-border);
+  background-color: var(--ws-panel-2);
+  border-color: var(--ws-border);
+}
+
+html[data-theme='dark'] .elx-prompts .elx-prompts__item {
+  background: var(--ws-panel-2);
+  border-color: var(--ws-border);
+  color: var(--ws-text);
+}
+
+html[data-theme='dark'] .elx-prompts .elx-prompts__item:hover {
+  background: var(--ws-panel);
+  border-color: var(--ws-border-strong);
+}
+
+/* ------------------------------------------------- 顶栏的主题菜单（浮层）----
+   el-dropdown 的菜单 teleport 到 body，组件里的 scoped 样式够不着，所以写在这里。
+   `.is-active` 给「当前模式」那一项加一个右对齐的勾 —— 光靠 EP 自带样式表达不出来，
+   而「四种模式里到底选了哪个」正是最需要一眼看清的地方。 */
+.theme-menu__hint {
+  margin-left: 2px;
+  font-size: var(--ws-fs-xs);
+}
+
+.el-dropdown-menu__item.is-active {
+  color: var(--ws-accent);
+  font-weight: 600;
+}
+
+.el-dropdown-menu__item.is-active::after {
+  content: '✓';
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+/* ==========================================================================
+   手机档（≤760px）
+   ==========================================================================
+   手机适配的规则集中写在这里，桌面（≥761px）一个字都不变。
+   断点数字的含义、以及它和 src/core/ui.ts 的 MOBILE_MAX 为什么必须同步，
+   见 tokens.css 的「断点（只看不引）」注释块。
+
+   分界线：**能全站生效的写这里**（页面留白、弹窗宽度、横向导航、表单对齐、
+   卡片列表的样子），**要换信息形态的才回视图里做**（宽表格换成哪种卡片、
+   周课表在手机上怎么摆）。前者一处改完全站生效，后者必须逐页设计。
+   ========================================================================== */
+
+/* ------------------------------------------------- 页面留白（42 个视图）--
+   桌面是 `28px 32px 72px`：390px 屏上左右各 32px 就是 64px，白吃掉屏幕 16%。
+   收到 14px 是权衡值 —— 再小卡片圆角会顶到屏幕边缘，看着像被裁过。
+   注意 `--ws-page-max` 在手机上本来就不生效（屏比它窄），真正要收的是这两侧内边距。 */
+@media (max-width: 760px) {
+  .ws-page {
+    padding: 16px 14px 48px;
+  }
+
+  /* 点按目标下限：实测全站 100+ 个按钮只有 24px 高（页面头的「刷新」「编辑/删除」、
+     文字按钮「打开日历 ›」、胶囊页签…），手机上手指点不准。
+     统一抬到 30–32px，只加高度与最小宽度，不改配色，版式不会散。 */
+  .el-button {
+    min-height: 32px;
+  }
+  /* 只抬高度，**不许动左右内边距** —— 2026-09-28 踩过：加了 padding-left/right: 6px
+     把按钮压窄，「采集」这种两字标签直接折成两行。
+     按钮文字一律不折行。 */
+  .el-button.is-text,
+  .el-button.is-link,
+  .el-button--small {
+    min-height: 30px;
+  }
+  .el-button {
+    white-space: nowrap;
+  }
+  .el-radio-button__inner {
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ws-row button {
+    min-height: 30px;
+  }
+
+  /* 页面头里控件很多的工具条（做题本那种 6~7 个）：手机档排成两列等宽网格。
+     默认的 flex 换行会排出参差不齐的三行，而且 EP 相邻按钮还带 margin-left，
+     换行后左边会空一截。用得着的页面给 actions 外面加一层 .ws-tools 就行。
+     单个控件要整行宽的（日期、起点这类）加 .ws-tools__wide。 */
+  .ws-tools {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+  .ws-tools > * {
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
+  .ws-tools > .ws-tools__wide {
+    grid-column: 1 / -1;
+  }
+  /* 「起点」那种纯标签在手机上省掉：输入框自带 Day N 占位与 title */
+  .ws-tools .zts__ctl-label {
+    display: none;
+  }
+  /* 工具条里的输入框/下拉/日期选择器：EP 的 size="small" 只有 24px 高，
+     和旁边 32px 的按钮同排看着参差、手指也难点 —— 统一抬到 32px。 */
+  .ws-tools .el-input__wrapper,
+  .ws-tools .el-select__wrapper {
+    min-height: 32px;
+  }
+
+  /* 通用小控件抬到「能点」：EP 的 tag 只有 22px 高、里面的关闭叉 12×12；
+     checkbox/radio 整行 24px。手机档统一给到 26~28px（肉眼看不出差别，手指好点）。 */
+  .el-tag {
+    min-height: 26px;
+  }
+  .el-tag__close {
+    width: 18px;
+    height: 18px;
+  }
+  .el-checkbox,
+  .el-radio {
+    min-height: 28px;
+  }
+  /* 没有文字的 checkbox（列表里那种光秃秃一个框）宽度只有 14px，太细；
+     给 label 留 26px 的点按区（方块视觉不变，label 本身就能转发点击）。 */
+  .el-checkbox {
+    min-width: 26px;
+  }
+  /* EP 的小号开关本体 30×24，高度给到 28：视觉尺寸不变，点按区变大。
+     几个带一排开关的页面（进程守护 / 设置）全是这个。 */
+  .el-switch,
+  .el-switch--small {
+    min-height: 28px;
+  }
+  /* link / text 按钮常常是「一个字的删/改名」或纯图标，宽度只有 18px ——
+     给个 28px 的最小宽度（长标签的按钮本来就比这宽，不受影响）。 */
+  .el-button.is-link,
+  .el-button.is-text {
+    min-width: 28px;
+  }
+  /* .ws-row 是「一行排开」的通用工具类：手机上挤不下时改成换行。
+     实测 /vocab/study 那句「你还有 48 个错题没消化」被同行的按钮挤成 16px 宽、竖排 10 行。 */
+  .ws-row {
+    flex-wrap: wrap;
+  }
+}
+
+/* ------------------------------------------------- 卡片列表（替代宽表格）--
+   21 张 el-table（118 列，其中 114 列写死像素宽）+ 8 个原生 table，
+   手机档一律换成竖排卡片 —— 11 列的表靠左右拖，右侧的操作按钮几乎没法用。
+
+   三种原型：
+     行卡     .ws-cards__item          主标题 + 副行 + 字段区 + 操作区
+     可展开卡  行卡 + .ws-cards__more   替代 el-table 的 type="expand"
+     统计卡   沿用各页已有的 .statcard 写法，不往这套里塞
+
+   换列约定（**每张表都照这个来，别一张表一套**）：
+     主键列 → __title      次要列 → __sub        其余列 → __fields 里的「标签:值」
+     操作列 → __act        selection → 卡片左上角 checkbox
+
+   桌面端不用它：≥761px 那些页面照旧渲染 el-table。 */
+.ws-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ws-cards__item {
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-border);
+  border-radius: var(--ws-radius);
+}
+
+.ws-cards__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ws-cards__title {
+  min-width: 0;
+  font-size: var(--ws-fs-base);
+  font-weight: 600;
+  line-height: 1.45;
+  /* 长路径 / 哈希 / URL 在窄屏必须能断开：一张卡撑宽整页是手机上最常见的溢出源 */
+  overflow-wrap: anywhere;
+}
+
+.ws-cards__sub {
+  min-width: 0;
+  margin-top: 3px;
+  color: var(--ws-text-2);
+  font-size: var(--ws-fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.ws-cards__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 8px;
+  font-size: var(--ws-fs-xs);
+  color: var(--ws-text-2);
+}
+
+.ws-cards__field {
+  display: inline-flex;
+  gap: 4px;
+  min-width: 0;
+  align-items: baseline;
+}
+
+/* 长文本字段（依据 / 错误信息 / 结果这类）：独占一整行，别和短字段挤 */
+.ws-cards__field--full {
+  flex: 1 1 100%;
+}
+
+/* 标签永不被挤：2026-09-28 实测手机上「来源/结果/结论」被压成 12px 宽、竖排 2~5 行 */
+.ws-cards__field-k {
+  color: var(--ws-text-3);
+  flex: none;
+  white-space: nowrap;
+}
+
+.ws-cards__field-v {
+  color: var(--ws-text);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.ws-cards__act {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+/* 操作区的标签不许被压到折行：实测 390px 下 span.ws-dim「采集」被压成 24px 宽、竖排两行。
+   注意**不能用 min-width: max-content** —— 汉字随处可断行，CJK 的 max-content 只等于「一个字」，
+   所以那条对本项目绝大多数标签无效（踩过一次）。按钮/标签文字一律 nowrap，
+   挤不下靠容器的 flex-wrap 换行。 */
+.ws-cards__act > * {
+  white-space: nowrap;
+}
+
+/* 可展开卡：替代 el-table 的 type="expand"（CampusMonitor 有两处） */
+.ws-cards__more {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--ws-border);
+}
+
+/* 卡片里的小标签：紧挨标题用的（状态、类型这类），单独给个样式免得每页自己描 */
+.ws-cards__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+@media (max-width: 760px) {
+  /* -------------------------------------------- 弹窗 / 抽屉（24 + 5 处）--
+     24 个 el-dialog **全部写死像素宽**（8 个 ≥700px，最宽的那个播放器 920px），
+     5 个抽屉也是 px（560/450/640/640）。EP 把尺寸写成内联样式，所以必须 !important。
+     这是本项目第二处对 EP 的全局覆写（第一处在上面，只改圆角），只在手机档生效。
+     两个例外在页面里另行布局：宽屏视频页、做题本的导出弹窗（改成上下堆叠）。 */
+  .el-dialog {
+    width: calc(100vw - 20px) !important;
+    max-width: 100%;
+    margin: 10px auto !important;
+  }
+
+  .el-dialog__body {
+    max-height: calc(100vh - 150px);
+    max-height: calc(100dvh - 150px);
+    overflow-y: auto;
+  }
+
+  .el-drawer.rtl,
+  .el-drawer.ltr {
+    width: min(92vw, 420px) !important;
+  }
+
+  .el-drawer.ttb,
+  .el-drawer.btt {
+    height: min(92vh, 100%) !important;
+    height: min(92dvh, 100%) !important;
+  }
+
+  /* ------------------------------------------ 横向导航（4 tabs + 26 组）--
+     当 tab 用的标签栏在窄屏会顶出去（ApiConsole 5 个页签合计 410px、
+     一排开关合计 450px，超出 362px 的可用宽）。
+     必须 !important：EP 的 `.el-tabs__nav-wrap { overflow: hidden }` 在按需加载的
+     chunk 里（el-tab-pane-*.css），加载顺序在我的全局样式之后，同优先级就盖掉了这条 ——
+     和上面弹窗那一处是同一类问题。
+     注：.el-radio-group 不在这里动 —— EP 默认 flex-wrap: wrap，本来就会换行，
+     强行改成 nowrap+滚动反而会把该换行的表单控件挤成一条。哪一页真溢出了再单独修。 */
+  /* 页签本体：EP 的滚动容器是 `.el-tabs__nav-scroll`（外层 nav-wrap 只是定位框，
+     被 nav-scroll 裁着，所以往 nav-wrap 上加 overflow 是空的 —— 实测过）。
+     让它自己横向滚，手机上就能直接滑页签，不必依赖 EP 那两个小箭头。
+     `min-width: 0` 是配套的：EP 给 nav-wrap 的是 flex: auto，而 flex 项默认
+     min-width: auto（不许收缩到内容以下），不放开的话 nav-wrap 会一直撑到 450px。 */
+  .el-tabs__nav-wrap {
+    min-width: 0;
+  }
+
+  /* EP 的左右滚动箭头（nav-prev/nav-next）有 44px 高，会把 40px 高的页签条撑出
+     4px 的纵向裁切（门禁实测 /process-guard 报过「被裁」）。
+     手机上页签条自己就能横向滑（见下面的 nav-scroll），这对箭头多余 —— 隐掉最干净。 */
+  .el-tabs__nav-prev,
+  .el-tabs__nav-next {
+    display: none;
+  }
+
+  .el-tabs__nav-scroll {
+    overflow-x: auto !important;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .el-tabs__nav-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ------------------------------------------------- 表单 label 顶对齐 --
+     8 个 el-form（5 个文件）用 label-width 76~88px + left/right 排布，
+     窄屏上 label 占掉三分之一、输入框只剩两百多，全改成顶对齐。
+     EP 把 label 宽度和 content 的 margin-left 都写成内联样式，所以都要 !important。 */
+  .el-form-item {
+    display: block;
+  }
+
+  .el-form-item__label {
+    width: auto !important;
+    justify-content: flex-start !important;
+    margin-bottom: 2px;
+    text-align: left !important;
+  }
+
+  .el-form-item__content {
+    margin-left: 0 !important;
+  }
+
+  /* --------------------------------------------------------- 页头操作行 --
+     .ws-page-head 自己带 flex-wrap，但它右侧那排操作（.ws-row）没有 ——
+     有的页面手写页头把「240px 搜索框 + 三个按钮」排在一行，合计 600px，
+     手机上整页被顶宽。给页头里的操作行统一允许换行。
+     只限 .ws-page-head 内：.ws-row 是全站工具类，别处的换行行为不动。 */
+  .ws-page-head .ws-row {
+    flex-wrap: wrap;
+  }
+
+  /* ------------------------------------------------ 长公式（做题本/知识库）--
+     KaTeX 的 display 公式是一整块 nowrap 的盒（矩阵、多行推导一下就能超一屏）。
+     给它自己一个横向滚动，比让它把整页顶宽好 —— 溢出被困在这一块里，
+     其余内容照常排版。 */
+  .katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 2px 0;
+  }
+}
+
+/* ------------------------------------------------------ 触屏没有 hover ----
+   全站约 120 条 :hover，绝大多数只是变色/高亮，没有也不影响操作 —— 一律不动。
+   真正「不 hover 就看不见」的只有两处，而且它们是各自页面里唯一的操作入口：
+
+     · PlanBoard  .step__del      备考步骤的删除按钮（opacity: 0）
+     · memo.css   .hot__cat-ops   热词分类的增删改（display: none）
+
+   用 hover: none 让它们在触屏上常显；带鼠标的设备保持原样。
+   必须 !important：这两条原本写在组件的 `<style scoped>` 里，编译后选择器会带上
+   `[data-v-xxx]` 属性，优先级 (0,2,0) 高于这里的 (0,1,0)，不加就不会生效。
+
+   （PagesPanel 的 .pg__grip 列宽拖拽把手**不在这里处理**：手机上根本没法拖，
+     它归到知识库那批里改成手机档隐藏。） */
+@media (hover: none) {
+  .step__del {
+    opacity: 1 !important;
+  }
+
+  .memo .hot__cat-ops {
+    display: flex !important;
+  }
+}
+
+/* -------------------------------------------- 响应式文案 / 页头 compact ---
+   2026-09-29（用户手机截图：做题目一进来，半个屏都是说明文字和控件）：
+   同一句提示桌面要详细、手机要短 —— 拆成两个 span 各自带类：
+     .ws-hide-sm  桌面显示、手机藏
+     .ws-only-sm  手机显示、桌面藏（默认规则必须先写，且在这条 @media 之前）
+   PageHeader 的 compact 模式同理：小屏收起副标题（opt-in，不影响的页面照旧）。 */
+.ws-only-sm {
+  display: none;
+}
+@media (max-width: 760px) {
+  .ws-only-sm {
+    display: inline;
+  }
+  .ws-hide-sm {
+    display: none !important;
+  }
+  .ws-page-head.is-compact .ws-subtitle {
+    display: none;
+  }
 }

@@ -1,0 +1,604 @@
+/**
+ * 做题本共用版式 —— 「一份一卡」的卡片、留白区、对错/档位标记、导出弹窗与预览纸。
+ *
+ * 为什么抽出来（2026-09-29）：英语「每日一句」也要按做题本的样子给（一页一句、点留白出答案、
+ * 导出 PDF），两份册子必须是**同一套版式**，不然改一处、另一处慢慢跑偏。
+ * 现在是两份共用这一份：`ZuotibenView.vue`（数学每日一题）与 `SentenceBook.vue`（英语每日一句）。
+ *
+ * 类名前缀 `ztb__` 只属于这里。**新块加类名要带区分前缀**（页面自己的块用 `zts__` 之类）——
+ * 2026-09-27 那次就是把导出弹窗的格式卡也叫了 `.ztb__card`，跟题目卡撞名，
+ * 整张题卡被套上 `display: flex` 压成横向，全站都花了。
+ *
+ * 颜色一律走设计令牌：暗色下写死的浅底会变成「白底白字」（见 tokens.css）。
+ */
+
+/* -------------------------------------------------------------- 页面外框 --- */
+/* 两本册子的外壳（.ztb 的宽度交给全站的 --ws-page-max，不在这儿写 max-width） */
+
+.ztb {
+  padding: 16px 18px 40px;
+}
+/* 标题下面那条信息行：来源 · 一共几份 · 各档几个 · 「现在做的是第几天」 */
+.ztb__bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--ws-text-2, #6b7280);
+}
+.ztb__src {
+  font-weight: 600;
+  color: var(--ws-text, #111827);
+}
+.ztb__count b {
+  color: var(--ws-accent, #4f46e5);
+}
+.ztb__count b.is-right,
+.ztb__count b.is-good {
+  color: var(--ws-success);
+}
+.ztb__count b.is-half {
+  color: var(--ws-warn);
+}
+.ztb__count b.is-wrong,
+.ztb__count b.is-lost {
+  color: var(--ws-danger);
+}
+.ztb__count b.is-left {
+  color: var(--ws-text-2);
+  font-weight: 400;
+}
+.ztb__hintline {
+  color: var(--ws-warn);
+}
+.ztb__hint {
+  font-size: 13px;
+  line-height: 1.9;
+  color: var(--ws-text-2, #6b7280);
+}
+.ztb__hint code {
+  background: var(--ws-panel-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ------------------------------------------------------------------ 卡片 --- */
+
+.ztb__card {
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-border, #e5e7eb);
+  border-radius: 12px;
+  padding: 16px 18px 14px;
+  margin-bottom: 16px;
+}
+/* 卡片描边跟着结果走：对=绿、错/没读懂=红、半懂=琥珀，没标就保持中性 */
+.ztb__card.is-right,
+.ztb__card.is-good {
+  border-color: color-mix(in srgb, var(--ws-success) 45%, transparent);
+}
+.ztb__card.is-half {
+  border-color: color-mix(in srgb, var(--ws-warn) 45%, transparent);
+}
+.ztb__card.is-wrong,
+.ztb__card.is-lost {
+  border-color: color-mix(in srgb, var(--ws-danger) 45%, transparent);
+}
+
+.ztb__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--ws-text-2, #6b7280);
+  margin-bottom: 10px;
+}
+.ztb__no {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ws-text, #111827);
+}
+.ztb__origin,
+.ztb__tag,
+.ztb__topic,
+.ztb__kind {
+  background: var(--ws-panel-2);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+/* 结果只做「显示」：跟着标签流排在左边，不做成右侧的交互控件 */
+.ztb__state {
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-weight: 600;
+}
+.ztb__state.is-right,
+.ztb__state.is-good {
+  background: var(--ws-success-soft);
+  color: var(--ws-success);
+}
+.ztb__state.is-half {
+  background: var(--ws-warn-soft);
+  color: var(--ws-warn);
+}
+.ztb__state.is-wrong,
+.ztb__state.is-lost {
+  background: var(--ws-danger-soft);
+  color: var(--ws-danger);
+}
+
+.ztb__stem {
+  font-size: 15.5px;
+  line-height: 1.95;
+  color: var(--ws-text);
+}
+/* 行内模式的公式抬一点（2026-09-29）：纯公式题（lim 分式填空那种）整题都是行内公式，
+   按 LaTeX 行内规则排出来比正文小一截，手机上尤其费眼；块级公式（.katex-display
+   里那种居中陈列的）保持原大，别动。题干和解析区都适用。 */
+.ztb__stem .katex,
+.ztb__work-sol .katex {
+  font-size: 1.05em;
+}
+.ztb__stem .katex-display .katex,
+.ztb__work-sol .katex-display .katex {
+  font-size: 1em;
+}
+.ztb__opts {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 6px 18px;
+  font-size: 15px;
+  line-height: 1.9;
+}
+
+/* ------------------------------------------------------------------ 留白 --- */
+/* 这一块既是手写区，也是「点一下出答案」的开关，而且**答案就出在这块区域里**
+   （2026-09-27 用户要求：解析出现在横线上，不是另起一块放在下面）。
+   所以整块可点、内容渲染在内部；展开时把横线隐掉，否则文字与线距对不齐会显得很乱。 */
+.ztb__work {
+  position: relative;
+  margin-top: 12px;
+  min-height: 200px;
+  border-top: 1px dashed var(--ws-border);
+  border-radius: 8px;
+  background: repeating-linear-gradient(to bottom, transparent 0 31px, var(--ws-border) 31px 32px);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.ztb__work:hover {
+  background-color: var(--ws-panel-2);
+}
+.ztb__work.is-open {
+  background-image: none;
+  background-color: var(--ws-accent-soft);
+  padding: 10px 12px 26px;
+  cursor: pointer;
+}
+.ztb__work-hint {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  font-size: 12px;
+  color: var(--ws-border-strong);
+  letter-spacing: 1px;
+}
+.ztb__work-sol {
+  font-size: 14.5px;
+  line-height: 1.95;
+  color: var(--ws-text);
+}
+.ztb__work-sol b {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ws-accent, #4f46e5);
+}
+/* 提示常驻在右下角：不做悬停才出现，否则「点了才知道能点」等于没有提示 */
+.ztb__work-toggle {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  font-size: 12px;
+  color: #a5b4fc;
+}
+.ztb__work.is-open .ztb__work-toggle {
+  color: #8b5cf6;
+}
+
+/* -------------------------------------------------------- 做对/做错 · 档位 --- */
+/* 留白（答案）区正下方 —— 手写和看解析的视线落点就在这儿，手指也够得着。
+   用原生 button 自己描样式：Element 的按钮底色太实，摆一起像几块色卡，很丑。
+   没选中是白底细边（安静），选中才上颜色，再点一次取消。
+   数学册两颗：做对（is-right）· 做错（is-wrong）；
+   英语册三颗：读懂（is-good）· 半懂（is-half）· 没读懂（is-lost）。 */
+.ztb__marks {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.ztb__marks-label {
+  font-size: 13px;
+  color: var(--ws-text-2, #6b7280);
+}
+.ztb__mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 92px;
+  height: 38px;
+  padding: 0 16px;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--ws-border);
+  background: var(--ws-panel);
+  color: var(--ws-text-2);
+  font-size: 14.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background-color 0.16s,
+    border-color 0.16s,
+    color 0.16s,
+    box-shadow 0.16s;
+}
+.ztb__mark:hover {
+  border-color: var(--ws-border-strong);
+  background: var(--ws-panel-2);
+}
+.ztb__mark:active {
+  transform: translateY(1px);
+}
+/* 勾/叉本身：细一号、颜色跟着按钮走 */
+.ztb__mark-ico {
+  font-size: 15px;
+  line-height: 1;
+}
+.ztb__mark.is-right,
+.ztb__mark.is-good {
+  border-color: color-mix(in srgb, var(--ws-success) 45%, transparent);
+  background: var(--ws-success-soft);
+  color: var(--ws-success);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12);
+}
+.ztb__mark.is-right:hover,
+.ztb__mark.is-good:hover {
+  border-color: color-mix(in srgb, var(--ws-success) 45%, transparent);
+  background: var(--ws-success-soft);
+}
+.ztb__mark.is-half {
+  border-color: color-mix(in srgb, var(--ws-warn) 45%, transparent);
+  background: var(--ws-warn-soft);
+  color: var(--ws-warn);
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.12);
+}
+.ztb__mark.is-half:hover {
+  border-color: color-mix(in srgb, var(--ws-warn) 45%, transparent);
+  background: var(--ws-warn-soft);
+}
+.ztb__mark.is-wrong,
+.ztb__mark.is-lost {
+  border-color: color-mix(in srgb, var(--ws-danger) 45%, transparent);
+  background: var(--ws-danger-soft);
+  color: var(--ws-danger);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+}
+.ztb__mark.is-wrong:hover,
+.ztb__mark.is-lost:hover {
+  border-color: color-mix(in srgb, var(--ws-danger) 45%, transparent);
+  background: var(--ws-danger-soft);
+}
+.ztb__mark:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.ztb__marks-tip {
+  font-size: 12px;
+  color: var(--ws-text-3);
+}
+
+/* 备注：做错原因 / 自己想记的话。解析在上面那块里，别混。
+   这份是普通 .css（不是 SFC 的 scoped 样式），写不了 :deep()，直接后代选择器。 */
+.ztb__note {
+  margin-top: 10px;
+}
+.ztb__note .el-textarea__inner {
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+/* ------------------------------------------------------- 导出对话框 --- */
+/* 左设置 / 右预览；控件都是自己描的（el-radio-group 这里不好用：direction="vertical" 不生效，
+   三个格式会挤成一行，圆点尺寸也和分段按钮不搭）。弹窗里少写解释，只留一行页数说明。 */
+.ztb__exp {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+.ztb__exp-left {
+  flex: 0 0 216px;
+}
+.ztb__exp-right {
+  flex: 1;
+  min-width: 0;
+}
+.ztb__exp-right-title {
+  font-size: 12.5px;
+  color: var(--ws-text-2, #6b7280);
+  margin-bottom: 8px;
+}
+.ztb__exp-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ws-text-2, #6b7280);
+}
+
+.ztb__opt {
+  margin-bottom: 18px;
+}
+.ztb__opt--last {
+  margin-bottom: 0;
+}
+.ztb__opt-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ws-text, #111827);
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+/* 二选一：iOS 那种分段控件 */
+.ztb__seg2 {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--ws-panel-2);
+  border-radius: 9px;
+}
+.ztb__seg2.is-off {
+  opacity: 0.45;
+}
+.ztb__seg2-btn {
+  flex: 1;
+  height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ws-text-2);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.ztb__seg2-btn:hover:not(.is-on):not(:disabled) {
+  color: var(--ws-text);
+}
+.ztb__seg2-btn.is-on {
+  background: var(--ws-panel);
+  color: var(--ws-accent, #4f46e5);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+.ztb__seg2-btn:disabled {
+  cursor: not-allowed;
+}
+
+/* 三选一：带说明的卡片行 —— 说明文字挤在单选框旁边最难看，改成竖排两行 */
+.ztb__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ztb__fcard {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid var(--ws-border);
+  border-radius: 9px;
+  background: var(--ws-panel);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.ztb__fcard:hover {
+  border-color: var(--ws-border-strong);
+}
+.ztb__fcard.is-on {
+  border-color: var(--ws-accent, #4f46e5);
+  background: var(--ws-accent-soft);
+}
+/* 圆点自己画：选中时中间填一个实心点 */
+.ztb__fcard-dot {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  border: 1.5px solid var(--ws-border-strong);
+  border-radius: 50%;
+  position: relative;
+  transition: border-color 0.15s;
+}
+.ztb__fcard.is-on .ztb__fcard-dot {
+  border-color: var(--ws-accent, #4f46e5);
+}
+.ztb__fcard.is-on .ztb__fcard-dot::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--ws-accent, #4f46e5);
+}
+.ztb__fcard-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ztb__fcard-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ws-text, #111827);
+}
+.ztb__fcard-hint {
+  font-size: 11.5px;
+  color: var(--ws-text-3);
+  line-height: 1.5;
+}
+
+/* 预览：一张按当前选项缩放的纸，内容是第 1 份的真实渲染 */
+.ztb__paper {
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-border);
+  border-radius: 8px;
+  padding: 12px 13px 9px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--ws-text);
+  display: flex;
+  flex-direction: column;
+  /* 预览就是「一张纸的比例」：横向 297:210、纵向 210:297。
+     不裁的话内容会把纸撑高，横放看着还是竖的，等于没体现方向。 */
+  overflow: hidden;
+}
+.ztb__paper.is-land {
+  aspect-ratio: 297 / 210;
+}
+.ztb__paper:not(.is-land) {
+  aspect-ratio: 210 / 297;
+  /* 纵向纸按 210:297 会长到 620+，弹窗就得内部滚动。
+     限一下宽度（约 424 高），两种方向都能一眼看完，不用在里面滚。 */
+  max-width: 300px;
+}
+.ztb__paper-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9.5px;
+  color: var(--ws-text-2);
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--ws-border);
+  margin-bottom: 7px;
+}
+.ztb__paper-no {
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+.ztb__paper-ref {
+  font-weight: 400;
+  color: var(--ws-text-3);
+  font-size: 9.5px;
+  margin-left: 3px;
+}
+.ztb__paper-stem {
+  font-size: 11px;
+}
+.ztb__paper-opts {
+  display: grid;
+  /* minmax(0,1fr)：不写的话长选项会把列撑宽、挤成一行一个（预览里就变四行了） */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px 12px;
+  margin-top: 4px;
+  color: var(--ws-text);
+  font-size: 9.5px;
+  line-height: 1.25;
+}
+/* 选项：一行一个，超了省略（缩略图，不求全） */
+.ztb__paper-opts > span {
+  min-width: 0;
+  height: 15px;
+  line-height: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 留白：预览里也要看得出「这是要写字的地方」，太矮会显得像排版坏了 */
+.ztb__paper-blank {
+  flex: 1 1 auto;
+  min-height: 54px;
+  margin-top: 8px;
+  border-top: 1px dashed var(--ws-border);
+  border-radius: 4px;
+  background: repeating-linear-gradient(to bottom, transparent 0 15px, var(--ws-border) 15px 16px);
+}
+.ztb__paper.is-land .ztb__paper-blank {
+  min-height: 34px;
+}
+/* 答案/译文在预览里只露两行：它只是让人看出「答案印在这儿」，不是给人读的。
+   不卡高度的话它会吃掉五行的位置，把页脚顶出纸外（实测溢出 60px）。 */
+.ztb__paper-sol {
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid var(--ws-border);
+  font-size: 10px;
+  color: var(--ws-text);
+  max-height: 32px;
+  overflow: hidden;
+}
+.ztb__paper-sol b {
+  margin-right: 4px;
+  color: var(--ws-accent, #4f46e5);
+}
+.ztb__paper-foot {
+  text-align: right;
+  font-size: 9.5px;
+  color: var(--ws-text-3);
+  margin-top: 5px;
+}
+
+/* ------------------------------------------------------------ 手机档 ---
+   2026-09-29 用户拿手机截图：导出弹窗还是桌面的「左设置 / 右预览」两列，
+   右栏预览纸被压到一行只放得下四五个字（看图完全没用）。手机上改成上下堆叠：
+   设置在上、预览在下铺满宽度 —— 纸的比例、字号都不用动，行宽自然就够了。 */
+@media (max-width: 760px) {
+  .ztb__exp {
+    flex-direction: column;
+    gap: 14px;
+  }
+  .ztb__exp-left,
+  .ztb__exp-right {
+    flex: none;
+    width: 100%;
+    min-width: 0;
+  }
+  .ztb__exp-right {
+    border-top: 1px solid var(--ws-border);
+    padding-top: 12px;
+  }
+  /* 竖纸本来限宽 300px（怕弹窗内部滚动）——堆叠后就它一行，放开铺满更好看 */
+  .ztb__paper:not(.is-land) {
+    max-width: none;
+  }
+  /* 分段控件抬到手指好点的高度 */
+  .ztb__seg2-btn {
+    height: 34px;
+  }
+  .ztb__fcard {
+    padding: 10px 12px;
+  }
+
+  /* 页面本体紧凑一档（2026-09-29 用户手机截图：页头控件 + 说明占掉大半屏，
+     卡片再照桌面的边距走，一屏看不到几行题）—— 内边距/间距各收 3~4px，
+     字号不动（可读性底线）。 */
+  .ztb__card {
+    padding: 13px 13px 12px;
+    margin-bottom: 12px;
+    border-radius: 10px;
+  }
+  .ztb__bar {
+    gap: 6px 10px;
+    margin-bottom: 10px;
+  }
+  .ztb__head {
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+}

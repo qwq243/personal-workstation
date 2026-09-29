@@ -156,8 +156,61 @@ export const DEFAULTS = {
     model: 'whisper-1',
     /** 提示语言（ISO-639-1，如 zh / en）；留空让服务端自己判断 */
     language: '',
+    /** 密钥（实际值在 credentials.json，这里永远是空串） */
+    apiKey: '',
     /** 单次请求超时（秒）：长音频转写会慢，别设太小 */
     timeoutSec: 600,
+  },
+
+  /**
+   * 语音合成（朗读）—— 「每日一句」整句朗读用。
+   *
+   * 上游是 edge-tts（微软 Edge 的在线朗读，免费、不需要账号）。
+   * 本仓库带了一份薄封装 tools/edge-tts/say.py：把它连同 venv 放到任意目录，
+   * 用 dir 指过去即可（venv 在 <dir>/.venv，python 在 <dir>/.venv/Scripts/python.exe）。
+   * dir 留空 = 没配：朗读接口照常存在，前端会回落浏览器自带的朗读。
+   * 合成结果按文本哈希落 data/tts/cache/ 复用。
+   */
+  tts: {
+    /** edge-tts 工具目录（含 say.py 与 .venv）；留空 = 没配 */
+    dir: '',
+    /** 默认音色（英语）与中文音色 */
+    voice: 'en-US-AriaNeural',
+    voiceZh: 'zh-CN-XiaoxiaoNeural',
+    /** 语速，edge-tts 的格式：+0% / -10% */
+    rate: '+0%',
+  },
+
+  /**
+   * 资讯采集器的产物目录（「资讯」页只读它；采集本身不在这里做）。
+   *
+   * 采集器是独立进程 —— 本机计划任务、云机器 cron、或者就用 `scripts/collector-skeleton.mjs`
+   * 这个最小示例。边车只读它下面的 `out/latest.json`、`out/*.md`、`timeline/*.md`、
+   * `cases/*.md`、`sources.json` 这几样，字段契约见 docs/news-contract.md。
+   * dir 留空 = 没配：资讯模块从侧边栏隐藏（「没配 = 不显示」）。
+   */
+  collector: {
+    /** 采集结果目录（绝对路径；相对路径按仓库根解析） */
+    dir: '',
+    /** 抓外网源用的代理（只有「事件卡评论」那条路会出网）；留空 = 直连 */
+    proxy: '',
+  },
+
+  /** 资讯模块自己的一点配置 */
+  news: {
+    /** 「与我相关」的关键词：条目命中任一即归 focus 分类；留空 = 只认采集器标的分类 */
+    focusKeywords: [],
+  },
+
+  /**
+   * 做题本：题库池（「推荐同类题」用）。
+   *
+   * 题干与解析**都不随仓库分发**：自己买课后按 docs/zuotiben-import.md 把试题册与
+   * 解析册做成两份 markdown，再把路径填进来。三样都填了池子才可用；
+   * 留空 = 没配（池子为空，推荐接口回「没配题库目录」，做题本本体照常可用）。
+   */
+  zuotiben: {
+    pool: { dir: '', problems: '', solutions: '' },
   },
 
   /**

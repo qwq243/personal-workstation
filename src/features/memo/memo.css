@@ -1,0 +1,1200 @@
+/* 语音随记三个子页（转写 / 记录 / 配置）共用一份样式。
+   全部挂在 .memo 下 —— 它是全局样式表（三个页面各自 @import），加前缀才不会漏到别的页面去。
+   三个页面的根容器都写 `<div class="ws-page memo">`，宽度仍由 .ws-page 一处决定，这里不碰宽度。 */
+
+.memo {
+  /* 列表与详情共用同一个高度上限：两边封顶一致，滚动条看起来才是一对 */
+  --memo-pane-h: 74vh;
+}
+
+/* ====================================================== 通用块 --- */
+.memo .panel {
+  padding: 14px 16px 16px;
+  margin-bottom: 14px;
+}
+
+.memo .panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.memo .panel__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.memo .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ws-accent);
+}
+
+.memo .pill {
+  padding: 1px 9px;
+  border-radius: 999px;
+  background: var(--el-fill-color);
+  font-size: 12px;
+  color: var(--ws-text-2);
+}
+
+.memo .notice {
+  margin: 10px 0 0;
+  padding: 7px 11px;
+  border-radius: var(--ws-radius);
+  border: 1px solid var(--el-color-warning-light-7);
+  background: var(--el-color-warning-light-9);
+  color: var(--el-color-warning);
+  font-size: 12px;
+}
+
+/* 页尾那种一条警告：别用 el-alert 的默认边距，三个页面的收尾要一样 */
+.memo .memo-error {
+  margin-top: 14px;
+}
+
+/* 表单行：左侧固定宽标签、右侧控件吃满（字段多了才对齐；手机档见文件末尾） */
+.memo .field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.memo .field > label {
+  flex: 0 0 auto;
+  width: 72px;
+  white-space: nowrap;
+  font-size: 11.5px;
+  letter-spacing: 0.03em;
+  color: var(--ws-text-3);
+}
+
+.memo .field__ctl {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.memo .field__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 行内下拉要自己撑开：默认 width:100% 在 flex 行里会被压成几十像素（实测 34px，只剩个箭头） */
+.memo .field__row .field__ctl {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 150px;
+}
+
+.memo .field__tip {
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--ws-text-3);
+}
+
+/* 配置页的分组网格：两列，宽控件（提示词 / 存储那段话）整行 */
+.memo .cfg__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 26px;
+}
+
+@media (max-width: 900px) {
+  .memo .cfg__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.memo .cfg__wide {
+  grid-column: 1 / -1;
+  align-items: flex-start;
+}
+
+.memo .cfg__tip {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--ws-text-3);
+}
+
+.memo .cfg__tip code,
+.memo .field__tip code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--el-fill-color);
+  font-family: var(--ws-mono);
+}
+
+/* 「编辑提示词」旁边那颗小圆点：有自定义就亮，不进弹窗也能看出来 */
+.memo .field__mark {
+  position: absolute;
+  top: 6px;
+  right: -6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ws-accent);
+}
+
+.memo .field__link {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+/* ====================================================== 转写页 --- */
+
+/* 拖放区：整块可点，边框虚线是「这里能放东西」的唯一暗示 */
+.memo .drop {
+  padding: 22px 20px;
+  text-align: center;
+  cursor: pointer;
+  border: 1.5px dashed var(--ws-border-strong);
+  border-radius: var(--ws-radius-lg, 12px);
+  background: var(--ws-panel);
+  transition: all 0.15s ease;
+  margin-bottom: 14px;
+}
+
+.memo .drop.is-active {
+  border-color: var(--ws-accent);
+  background: var(--ws-accent-soft);
+}
+
+.memo .drop.is-off {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.memo .drop__icon {
+  font-size: 26px;
+  color: var(--ws-text-3);
+}
+
+.memo .drop__title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 8px;
+}
+
+.memo .drop__hint {
+  font-size: 12.5px;
+  margin-top: 6px;
+  line-height: 1.7;
+}
+
+/* 任务条：起任务后立刻出现，轮询它直到 done/error */
+.memo .job {
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+
+.memo .job__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.memo .job__name {
+  font-weight: 550;
+  word-break: break-all;
+}
+
+.memo .job__err {
+  color: var(--ws-danger, var(--el-color-danger));
+  font-size: 12.5px;
+  margin-top: 6px;
+  word-break: break-word;
+}
+
+.memo .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--ws-border);
+  background: var(--el-fill-color-lighter);
+  color: var(--ws-text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.memo .chip > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ws-text-3);
+}
+
+/* 任务状态：running 转圈看不出，靠颜色区分就够（绿=完成、红=错） */
+.memo .chip--running {
+  border-color: var(--el-color-primary-light-6);
+  color: var(--ws-accent);
+}
+
+.memo .chip--done {
+  border-color: var(--el-color-success-light-6);
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success-dark-2);
+}
+
+.memo .chip--error,
+.memo .chip--interrupted {
+  border-color: var(--el-color-danger-light-6);
+  background: var(--el-color-danger-light-9);
+  color: var(--el-color-danger);
+}
+
+/* 「最近转的」：转写页右栏，点一行去记录页看全文 */
+.memo .mini {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.memo .mini__row {
+  padding: 8px 10px;
+  border-radius: var(--ws-radius);
+  cursor: pointer;
+}
+
+.memo .mini__row:hover {
+  background: var(--el-fill-color-light);
+}
+
+.memo .mini__title {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.memo .mini__meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--ws-text-3);
+}
+
+/* 引导步骤：没有记录时告诉用户「下一步做什么」，而不是一片空白 */
+.memo .onboard {
+  padding: 22px 24px 20px;
+}
+
+.memo .steps {
+  list-style: none;
+  margin: 8px auto 0;
+  padding: 0;
+  max-width: 560px;
+  display: grid;
+  gap: 9px;
+}
+
+.memo .steps li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ws-text-2);
+}
+
+.memo .steps b {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--el-fill-color);
+  color: var(--ws-text-2);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* ====================================================== 记录页：列表 + 详情 --- */
+.memo .workspace {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 1000px) {
+  .memo .workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+.memo .list {
+  padding: 14px 12px 10px;
+  /* 与 .detail 同一档高度：列表自己滚，条目多了不把整页顶高 */
+  max-height: var(--memo-pane-h, 74vh);
+  min-height: 220px;
+  overflow-y: auto;
+  /* 滚到底就停住，不把滚动接力给整页 */
+  overscroll-behavior: contain;
+}
+
+/* 搜索 / 分类 / 标签三个筛选器：列表顶部一条，窄了就换行 */
+.memo .filters {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.memo .filters__row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.memo .filters__row .el-select,
+.memo .filters__row .el-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.memo .list__ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.memo .item {
+  padding: 8px 10px 9px;
+  border-radius: var(--ws-radius);
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  /* 长标题 / 长标签一律在条目里收住，不撑宽卡片 */
+  min-width: 0;
+  overflow: hidden;
+  transition: background 0.15s ease;
+}
+
+.memo .item:hover {
+  background: var(--el-fill-color-lighter);
+}
+
+.memo .item.is-active {
+  background: var(--el-color-primary-light-9);
+  border-left-color: var(--ws-accent);
+}
+
+.memo .item__title {
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.45;
+  margin-bottom: 3px;
+  /* 长英文 / 链接换行；标题最多两行，条目的高矮才整齐 */
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.memo .item__meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ws-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.memo .item__sum {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--ws-text-2);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.memo .item__tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 7px;
+  min-width: 0;
+}
+
+.memo .item__rec {
+  color: var(--ws-accent);
+}
+
+.memo .tag {
+  max-width: 100%;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ws-border);
+  background: var(--el-fill-color-lighter);
+  color: var(--ws-text-3);
+  font-size: 11px;
+  line-height: 17px;
+  /* 单个标签再长也只在条目内省略，不许横向溢出 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 主题标签：回答「这份记录主要讲什么」，比普通胶囊更醒目一点 */
+.memo .tag--topic {
+  border-color: var(--el-color-primary-light-7);
+  background: var(--el-color-primary-light-9);
+  color: var(--ws-accent);
+  font-size: 11.5px;
+  line-height: 18px;
+  padding: 0 9px;
+}
+
+.memo .tag--word {
+  font-family: var(--ws-mono);
+}
+
+.memo .tag--new {
+  border-color: var(--el-color-success-light-6);
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success-dark-2);
+  font-family: var(--ws-mono);
+}
+
+.memo .detail {
+  /* 上内边距交给吸顶的标题栏自己 —— 容器留白的话，滚过去的字会从标题栏上方那条缝里露出来 */
+  padding: 0 20px 20px;
+  min-height: 220px;
+  /* 内容再多也在卡片里滚：长稿的栏目 + 分段详析能到上万像素，不封顶会把整页顶得老长 */
+  max-height: var(--memo-pane-h, 74vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.memo .detail--empty {
+  padding-top: 18px;
+}
+
+/* 分段详析展开后也单独滚 */
+.memo .detail .el-collapse-item__content {
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* 标题栏吸顶：长稿滚到几千像素时，「导出 MD」这几个按钮不用再翻回顶部找。
+   通栏 + 不透明底是必须的：左右内边距和标题后面的位置都不能透出滚过去的字。 */
+.memo .detail__head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 -20px;
+  padding: 16px 20px 10px;
+  background: var(--ws-panel);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+/* 只在真吸住时给一条分隔线；用 shadow 不用 border，免得出现 1px 的跳动 */
+.memo .detail__head.is-stuck {
+  box-shadow: 0 1px 0 var(--ws-border), 0 10px 14px -14px rgba(15, 23, 42, 0.55);
+}
+
+.memo .detail__title {
+  flex: 1 1 260px;
+  max-width: 460px;
+}
+
+.memo .detail__title .el-input__wrapper {
+  box-shadow: none;
+  background: transparent;
+  padding-left: 0;
+}
+
+.memo .detail__title .el-input__inner {
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.memo .detail__title .el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--ws-border) inset;
+}
+
+.memo .detail__ops {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.memo .meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  /* 与标题栏的间距由标题栏的下内边距给（10px），这里不再加 */
+  margin: 0 0 2px;
+}
+
+.memo .sec {
+  margin-top: 16px;
+}
+
+.memo .sec__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.memo .sec__title {
+  position: relative;
+  margin: 0 0 7px;
+  padding-left: 10px;
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.memo .sec__title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  bottom: 3px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--ws-accent);
+}
+
+/* 长稿成稿过程中的那一块（推理与分块进度交给套件组件，这里只包外壳） */
+.memo .stream {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: var(--ws-radius);
+  border: 1px solid var(--ws-border);
+  background: var(--el-fill-color-lighter);
+}
+
+.memo .stream__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.memo .stream__meta {
+  font-size: 11.5px;
+}
+
+/* 分段详析（长稿的每一段）：折叠起来，不与总稿抢注意力 */
+.memo .part-title {
+  display: inline-flex;
+  gap: 8px;
+  align-items: baseline;
+  font-weight: 550;
+}
+
+.memo .part-sum {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+}
+
+.memo .part-sec + .part-sec {
+  margin-top: 10px;
+}
+
+.memo .part-sec b {
+  font-size: 12px;
+  color: var(--el-color-primary);
+}
+
+/* 原文与整理稿那种逐行块 */
+.memo .lines {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.memo .lines--boxed {
+  max-height: 46vh;
+  padding: 10px 12px;
+  border-radius: var(--ws-radius);
+  background: var(--el-fill-color-lighter);
+}
+
+.memo .lines__row {
+  margin: 0 0 6px;
+  font-size: 13.5px;
+  line-height: 1.75;
+  /* 长句里没有空格：不强制断词会把卡片撑破 */
+  overflow-wrap: anywhere;
+}
+
+.memo .lines__time {
+  display: inline-block;
+  min-width: 44px;
+  margin-right: 8px;
+  font-family: var(--ws-mono);
+  font-size: 11.5px;
+  color: var(--ws-text-3);
+}
+
+/* 整段原文（转写后端只回整篇、没有时间轴时用它）：换行保留，长句强制断词 */
+.memo .lines__text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ====================================================== 原始音频播放器 --- */
+.memo .audio-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 2px;
+}
+
+.memo .audio-wrap .audio {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.memo .audio-wrap__ops {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+}
+
+.memo .audio-none {
+  margin: 8px 0 2px;
+  font-size: 11.5px;
+}
+
+.memo .audio {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: var(--ws-radius-lg, 12px);
+  background: var(--el-color-primary-light-9);
+}
+
+.memo .audio__btn {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 999px;
+  background: var(--ws-accent, var(--el-color-primary));
+  color: #fff;
+  font-size: 17px;
+  cursor: pointer;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+
+.memo .audio__btn:hover {
+  opacity: 0.9;
+}
+
+.memo .audio__btn:active {
+  transform: scale(0.96);
+}
+
+.memo .audio__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.memo .audio__track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--el-fill-color-dark, #e5e7eb);
+  cursor: pointer;
+  /* 拖动进度条时别让浏览器顺手滚页面 */
+  touch-action: none;
+}
+
+.memo .audio__track.is-drag {
+  cursor: grabbing;
+}
+
+.memo .audio__fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: var(--ws-accent, var(--el-color-primary));
+}
+
+.memo .audio__knob {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  border-radius: 999px;
+  background: var(--ws-panel);
+  border: 2px solid var(--ws-accent, var(--el-color-primary));
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.memo .audio__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--ws-text-3);
+}
+
+.memo .audio__time {
+  font-family: var(--ws-mono);
+  color: var(--ws-text-2);
+}
+
+.memo .audio__err {
+  color: var(--el-color-danger);
+}
+
+.memo .audio__rate,
+.memo .audio__dl {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid var(--ws-border);
+  border-radius: 999px;
+  background: var(--ws-panel, #fff);
+  color: var(--ws-text-2);
+  font-family: var(--ws-mono);
+  font-size: 11.5px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.memo .audio__dl {
+  display: grid;
+  place-items: center;
+  text-decoration: none;
+}
+
+.memo .audio__rate:hover,
+.memo .audio__dl:hover {
+  border-color: var(--ws-accent, var(--el-color-primary));
+  color: var(--ws-accent, var(--el-color-primary));
+}
+
+/* ====================================================== 分类 / 标签 / 热词 --- */
+.memo .organize {
+  margin: 10px 0 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--ws-border);
+  border-radius: var(--ws-radius, 8px);
+  background: var(--el-fill-color-blank);
+}
+
+.memo .organize__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+}
+
+.memo .organize__row + .organize__row {
+  margin-top: 8px;
+}
+
+.memo .organize__row > label {
+  flex: 0 0 auto;
+  width: 34px;
+  font-size: 12px;
+  color: var(--ws-text-3);
+}
+
+.memo .organize__ctl {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 460px;
+}
+
+.memo .organize__hint {
+  font-size: 11.5px;
+}
+
+.memo .organize__tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* ====================================================== 热词库（配置页里那一块） --- */
+.memo .hot {
+  display: flex;
+  gap: 16px;
+  min-height: 420px;
+}
+
+.memo .hot--page .hot__list {
+  max-height: 46vh;
+}
+
+@media (max-width: 860px) {
+  .memo .hot {
+    flex-direction: column;
+  }
+}
+
+.memo .hot__cats {
+  flex: 0 0 190px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-right: 12px;
+  border-right: 1px solid var(--ws-border);
+}
+
+@media (max-width: 860px) {
+  .memo .hot__cats {
+    flex: 0 0 auto;
+    padding-right: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--ws-border);
+    padding-bottom: 10px;
+  }
+}
+
+.memo .hot__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.memo .hot__cat {
+  padding: 7px 9px;
+  border-radius: var(--ws-radius, 8px);
+  cursor: pointer;
+}
+
+.memo .hot__cat:hover {
+  background: var(--el-fill-color-light);
+}
+
+.memo .hot__cat.is-active {
+  background: var(--el-color-primary-light-9);
+}
+
+.memo .hot__cat-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.memo .hot__cat-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--ws-text-3);
+}
+
+/* 分类的改名 / 删：默认藏着，hover 或选中才露 —— 一列分类里挂满按钮太吵 */
+.memo .hot__cat-ops {
+  display: none;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.memo .hot__cat:hover .hot__cat-ops,
+.memo .hot__cat.is-active .hot__cat-ops {
+  display: flex;
+}
+
+.memo .hot__empty {
+  padding: 6px 0;
+  font-size: 12px;
+}
+
+.memo .hot__new {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.memo .hot__terms {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.memo .hot__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.memo .hot__head b {
+  font-size: 13px;
+}
+
+.memo .hot__head span {
+  font-size: 11.5px;
+}
+
+.memo .hot__spacer {
+  flex: 1 1 auto;
+}
+
+/* 词与别名与备注同一行：词固定、别名吃剩余、备注窄列（不然后面半行全空着） */
+.memo .hot__form {
+  position: relative;
+  display: grid;
+  grid-template-columns: 170px minmax(200px, 1fr) 190px auto auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--ws-radius, 8px);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+@media (max-width: 1100px) {
+  .memo .hot__form {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* 编辑态：表单整块点亮，并说清在改哪个词 */
+.memo .hot__form.is-editing {
+  border-color: var(--el-color-primary-light-6);
+  background: var(--el-color-primary-light-9);
+  padding-top: 20px;
+}
+
+.memo .hot__form-tag {
+  position: absolute;
+  top: 3px;
+  left: 12px;
+  font-size: 11px;
+  color: var(--ws-accent);
+}
+
+.memo .hot__table {
+  flex: 1 1 auto;
+  min-height: 0;
+  font-size: 12.5px;
+}
+
+.memo .hot__table .el-table__cell {
+  padding: 6px 0;
+}
+
+.memo .hot__table .el-table__header .el-table__cell {
+  padding: 7px 0;
+  color: var(--ws-text-3);
+  font-weight: 500;
+  font-size: 11.5px;
+}
+
+.memo .hot__aliases {
+  color: var(--ws-text-3);
+  font-family: var(--ws-mono);
+  font-size: 11.5px;
+}
+
+.memo .hot__table-empty {
+  margin: 18px 0;
+  color: var(--ws-text-3);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* 操作列：三个图标按钮等距右对齐，别用「改 挪 删」三个字挤成一团 */
+.memo .hot__ops {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.memo .hot__ops .el-button {
+  padding: 3px 5px;
+  font-size: 14px;
+  color: var(--ws-text-3);
+}
+
+.memo .hot__ops .el-button:hover {
+  color: var(--ws-accent);
+}
+
+.memo .hot__ops .hot__del:hover {
+  color: var(--el-color-danger);
+}
+
+.memo .hot__foot {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+/* 来源徽章（预设 / 自动 / 手加）：跟 12.5px 的字号配得上 */
+.memo .src {
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid var(--ws-border);
+  font-size: 10.5px;
+  line-height: 15px;
+  color: var(--ws-text-3);
+}
+
+.memo .src--auto {
+  border-color: var(--el-color-success-light-6);
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success-dark-2);
+}
+
+.memo .src--manual {
+  border-color: var(--el-color-primary-light-6);
+  background: var(--el-color-primary-light-9);
+  color: var(--ws-accent);
+}
+
+/* ====================================================== 提示词弹窗 --- */
+.memo .prompt-hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--ws-text-3);
+}
+
+.memo .prompt-list {
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.memo .prompt-row + .prompt-row {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--ws-border);
+}
+
+.memo .prompt-row__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.memo .prompt-row__head b {
+  font-size: 12.5px;
+}
+
+.memo .prompt-row__head span {
+  flex: 1 1 auto;
+  font-size: 11.5px;
+}
+
+.memo .prompt-row .el-textarea__inner {
+  font-family: var(--ws-mono);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.memo .prompt-foot {
+  float: left;
+  font-size: 11.5px;
+  line-height: 32px;
+}
+
+/* ====================================================== 手机档（≤760px）---
+   断点与 core/ui.ts 的 MOBILE_MAX 一致：那边决定行为（表格换卡片），这边决定样式。 */
+@media (max-width: 760px) {
+  /* 表单改成「标签一行、控件一行」：窄屏下左侧 72px 标签列会把控件压到只剩几十像素 */
+  .memo .field {
+    display: block;
+  }
+
+  .memo .field > label {
+    display: block;
+    width: auto;
+    margin-bottom: 6px;
+    font-size: 12px;
+  }
+
+  .memo .field__row {
+    flex-wrap: wrap;
+  }
+
+  /* 分段按钮不许被压窄：压窄就会换行成竖排 */
+  .memo .field__row .el-radio-group {
+    flex: 0 0 auto;
+  }
+
+  .memo .field__row .el-radio-group .el-radio-button__inner {
+    white-space: nowrap;
+  }
+
+  /* 行内下拉：手机上不再要求 150px 最小宽，让它跟着行走 */
+  .memo .field__row .field__ctl {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+
+  /* 热词分类行上的「改名 / 删」：手机上没有 hover，得常驻，而且要有能点到的尺寸 */
+  .memo .hot__cat-ops {
+    display: flex;
+  }
+
+  .memo .hot__cat-ops .el-button {
+    min-width: 28px;
+    min-height: 28px;
+  }
+
+  .memo .hot__spacer {
+    display: none;
+  }
+
+  .memo .hot__head {
+    flex-wrap: wrap;
+  }
+}

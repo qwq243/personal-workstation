@@ -240,6 +240,55 @@ export function dayDetail(day) {
   return { ok: true, item: d, records, pointer: prog.pointer }
 }
 
+/**
+ * 一段 Day 区间的全文（做题本的「每日一句」册与它的打印页用）。
+ *
+ * 与 `library()` 的区别：那个只给摘要（截到 170 字、给句子库列表看），
+ * 这个给**一句一条的全文**（原文 / 参考译文 / 结构划分 / 语法重点 / 词汇），
+ * 因为册子要一页一句地排出来。带上 `locked`：指针之后的句子还没轮到，
+ * 页面上不能打卡（规则是「做完才走」），打印不受影响。
+ */
+export function sheet({ from, to } = {}) {
+  const lib = loadLibrary()
+  if (!lib.ok) return { ok: false, error: lib.error }
+  const prog = loadProgress()
+  const byDay = latestByDay(prog)
+
+  let a = Math.trunc(Number(from))
+  let b = Math.trunc(Number(to))
+  if (!Number.isFinite(a) || a < 1) a = 1
+  if (!Number.isFinite(b) || b < a) b = a + 9
+  a = Math.min(a, lib.maxDay)
+  b = Math.min(Math.max(b, a), lib.maxDay)
+  // 上限 120 句：误传一个巨大的区间不该让边车把整本书渲染一遍
+  if (b - a + 1 > 120) b = a + 119
+
+  const items = []
+  for (let d = a; d <= b; d += 1) {
+    const it = lib.map.get(d)
+    if (!it) continue
+    const rec = byDay.get(d)
+    items.push({
+      ...it,
+      done: !!rec,
+      rating: rec?.rating ?? null,
+      at: rec?.at ?? null,
+      current: d === prog.pointer,
+      locked: d > prog.pointer,
+    })
+  }
+  return {
+    ok: true,
+    source: lib.source,
+    total: lib.total,
+    maxDay: lib.maxDay,
+    pointer: prog.pointer,
+    from: a,
+    to: b,
+    items,
+  }
+}
+
 /** 打卡日志：最近 N 天每天做没做（每日一句页的打卡格子） */
 export function log(days = 35) {
   const prog = loadProgress()

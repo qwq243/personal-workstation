@@ -13,7 +13,7 @@ export const serviceModule: WorkstationModule = {
   description: '边车自己的状态与开机自启位：端口与 PID、自启项体检（编码 / 路径 / 用的哪个 node），以及开启 / 关闭 / 删除。',
   icon: 'Monitor',
   color: '#0891b2',
-  // 不填 category = 置顶入口（和「进程守护」一样：都是「本机后台服务」这一类，不属于任何分组）
+  category: 'local',
   order: 8,
   homePath: '/service',
   routes: [

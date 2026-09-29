@@ -1,14 +1,19 @@
 <script setup lang="ts">
-/** 全部应用：功能卡片由注册表自动生成，按大模块（学习 / 待办 / 校内）分组。 */
+/** 全部应用：功能卡片由注册表自动生成，按大模块（本机 / 日常 / 学习 / 智能体 / 工具 …）分组。 */
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { getGroupedModules, getPinnedModules } from '@/core/registry'
+import { getGroupedModules, getModules } from '@/core/registry'
+import { pinnedEntries } from '@/core/leaf-pages'
+import { useUiStore } from '@/core/ui'
 
 const router = useRouter()
-/** 置顶入口（进程守护 / 运行与自启）：没有 category 的模块 */
-const pinned = computed(() => getPinnedModules())
+const ui = useUiStore()
+/** 置顶：左栏点星标置顶的叶子页面（和侧边栏同一份数据；判断在 core/leaf-pages.ts） */
+const pinned = computed(() => pinnedEntries(ui.pinnedPages))
 /** 大模块分组 */
 const groups = computed(() => getGroupedModules())
+/** 功能总数：按模块算 —— 置顶是同一批页面的快捷入口，别重复计数 */
+const totalModules = computed(() => getModules().length)
 
 function isComponentIcon(icon: string) {
   return /^[A-Z]/.test(icon)
@@ -25,43 +30,28 @@ function open(path: string) {
       <div class="hero__text">
         <h1 class="hero__title">全部应用</h1>
         <p class="hero__sub">
-          工作站的功能按大模块归好了：成长、办公、学习、待办、校内。每天进来先看每日看板，人怎么走看成长。
+          工作站的功能按大模块归好了：本机、日常、学习、智能体、工具。每天进来先看每日看板；
+          常开的那几页，鼠标移到左栏那一行、点行尾的星标就会顶上去（也可在「设置与数据 → 外观」里一键用推荐置顶）。
         </p>
       </div>
       <div class="hero__stat">
-        <div class="hero__stat-num">{{ pinned.length + groups.reduce((n, g) => n + g.modules.length, 0) }}</div>
+        <div class="hero__stat-num">{{ totalModules }}</div>
         <div class="hero__stat-label">个功能</div>
       </div>
     </div>
 
     <section v-if="pinned.length" class="group">
-      <div class="group__title">常用</div>
+      <div class="group__title">置顶</div>
       <div class="grid">
-        <button
-          v-for="mod in pinned"
-          :key="mod.id"
-          class="app-card"
-          :style="{ '--card-accent': mod.color ?? 'var(--ws-accent)' }"
-          @click="open(mod.homePath)"
-        >
+        <button v-for="e in pinned" :key="e.path" class="app-card" @click="open(e.path)">
           <div class="app-card__top">
             <div class="app-card__icon">
-              <el-icon v-if="isComponentIcon(mod.icon)"><component :is="mod.icon" /></el-icon>
-              <span v-else>{{ mod.icon }}</span>
+              <el-icon v-if="isComponentIcon(e.icon)"><component :is="e.icon" /></el-icon>
+              <span v-else>{{ e.icon }}</span>
             </div>
-            <span v-if="mod.badge && mod.badge()" class="app-card__badge">{{ mod.badge() }}</span>
             <el-icon class="app-card__arrow"><Right /></el-icon>
           </div>
-
-          <div class="app-card__name">{{ mod.name }}</div>
-          <div class="app-card__desc">{{ mod.description }}</div>
-
-          <div v-if="mod.stats && mod.stats().length" class="app-card__stats">
-            <div v-for="s in mod.stats()" :key="s.label" class="app-stat">
-              <div class="app-stat__v" :style="{ color: s.color }">{{ s.value }}</div>
-              <div class="app-stat__l">{{ s.label }}</div>
-            </div>
-          </div>
+          <div class="app-card__name">{{ e.title }}</div>
         </button>
       </div>
     </section>
@@ -176,7 +166,7 @@ function open(path: string) {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 258px), 1fr));
   gap: var(--ws-space-4);
 }
 

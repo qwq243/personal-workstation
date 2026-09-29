@@ -13,7 +13,7 @@ export const calendarModule: WorkstationModule = {
   icon: 'Calendar',
   color: '#0f766e',
   category: 'office',
-  order: 21,
+  order: 41,
   homePath: '/office/calendar',
   routes: [
     {

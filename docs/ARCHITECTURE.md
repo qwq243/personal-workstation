@@ -25,6 +25,8 @@
 ┌───────────────▼──────────────────────────────────────────────┐
 │ 外部世界：模型端点（OpenAI 兼容）· 嵌入端点 · 网络搜索          │
 │           MinerU 云端解析 · 有道词典发音音频 · 你的知识库目录   │
+│           采集器产物目录（只读）· 本机 Chrome/Edge（导出 PDF）  │
+│           edge-tts（朗读，可选）                                │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -47,19 +49,19 @@
 
 以打开 `#/dashboard` 为例（生产态，边车同时发页面）：
 
-1. `GET /` → `serveStatic()`（`server/index.mjs:1135`）→ `dist/index.html`。
+1. `GET /` → `serveStatic()`（`server/index.mjs:1274`）→ `dist/index.html`。
    缓存策略是 `no-cache` —— 这个名字固定、内容里写着当次的 chunk 名，不能缓存；
-   带内容哈希的 `/assets/*` 才是 `immutable`（`:1169-1172`）。
+   带内容哈希的 `/assets/*` 才是 `immutable`（`:1310`）。
 2. `index.html` → `/assets/index-*.js` → `src/main.ts`：
    - 先 `registerAllModules()`（`src/main.ts:38`）把各模块塞进注册表；
-   - 再 `await loadAppConfig()`（`src/main.ts:83`）取一次边车配置 —— 因为 `collectRoutes()`
+   - 再 `await loadAppConfig()`（`src/main.ts:102`）取一次边车配置 —— 因为 `collectRoutes()`
      会按各模块的 `visible()` 过滤，配置晚到会让路由表少几条，表现为「点了没反应」；
-   - 最后 `createAppRouter()`（`src/router/index.ts:90`）：`[...coreRoutes, ...collectRoutes()]`。
+   - 最后 `createAppRouter()`（`src/router/index.ts:153`）：`[...coreRoutes, ...collectRoutes()]`。
 3. 页面进入 `DashboardHome.vue` → `api.overview()` → `GET /api/overview` →
-   边车 `route('GET', /^\/api\/overview$/)`（`server/index.mjs:215`）：
+   边车 `route('GET', /^\/api\/overview$/)`（`server/index.mjs:224`）：
    - 内存缓存 20s 内 → 直接回；
-   - 过期但有值 → **立即回旧值**（标 `stale`）并后台刷新（`refreshOverview()`，`:204`）；
-   - 完全没有 → `buildOverview()`（`:179`）现拉。
+   - 过期但有值 → **立即回旧值**（标 `stale`）并后台刷新（`refreshOverview()`，`:213`）；
+   - 完全没有 → `buildOverview()`（`:188`）现拉。
 4. `buildOverview()` → `ai.gatherContext()` + `newapi.aiProvider()` → 由边车出网到模型端点。
 5. 结果写进内存与 `server/data/cache/overview.json`（`:152-169`），下次开页面直接命中磁盘缓存。
 
@@ -75,12 +77,12 @@
 
 | 通道 | 形状 | 用在哪 | 代码 |
 |---|---|---|---|
-| JSON API | `GET/POST/PATCH/PUT/DELETE /api/*`，统一回 `{ ok, ... }` | 绝大多数读写 | `server/index.mjs` 里 157 条 `route()` 注册 |
+| JSON API | `GET/POST/PATCH/PUT/DELETE /api/*`，统一回 `{ ok, ... }` | 绝大多数读写 | `server/index.mjs` 里 199 条 `route()` 注册 |
 | SSE | `text/event-stream`，帧是 `data: {json}\n\n` | 需要边生成边看的地方：知识库问答、语音随记总结 | `/api/wiki/chat/stream`、`/api/memo/summarize/stream` |
-| MCP | JSON-RPC 2.0 子集（`initialize`/`tools/list`/`tools/call`/`ping`），挂在 `/mcp` | 让智能体（MCP 客户端）读写工作站数据 | `server/mcp.mjs`，43 个工具 |
+| MCP | JSON-RPC 2.0 子集（`initialize`/`tools/list`/`tools/call`/`ping`），挂在 `/mcp` | 让智能体（MCP 客户端）读写工作站数据 | `server/mcp.mjs`，54 个工具 |
 
 二进制上传是个**唯一例外**：`Content-Type: application/octet-stream` 时 `readBody()`
-不按 utf8 解、原样交给处理器写盘（`server/index.mjs:90-104`）。只有知识库拖文件与语音上传走这条。
+不按 utf8 解、原样交给处理器写盘（`server/index.mjs` 的 `readBody()`，`:97` 起）。只有知识库拖文件与语音上传走这条。
 
 ### 1.4 鉴权握手
 
@@ -89,7 +91,7 @@
    ├─ Origin 不在白名单 → 403（别的网页连探测都做不到）
    └─ 命中 → { token }
 页面后续请求都带  X-WS-Token: <token>
-   ├─ 401 → 清掉内存里的令牌、重取一次再试一遍（src/core/sidecar.ts:113-116）
+   ├─ 401 → 清掉内存里的令牌、重取一次再试一遍（`src/core/sidecar.ts:114-118`）
    └─ 200
 ```
 
@@ -98,7 +100,7 @@
 - 免令牌的只有两个路径：`/api/health`、`/api/auth/token`（`auth.mjs:23`）。
   健康检查必须免鉴权 —— 前端靠它判断「边车在不在」。
 - 令牌**只放内存**，不进 localStorage：换牌子重启后自然重取，避免用到过期值。
-- 令牌轮换用 `rotateAuthToken()`（`server/config.mjs:576`），旧令牌立即失效。
+- 令牌轮换用 `rotateAuthToken()`（`server/config.mjs:616`），旧令牌立即失效。
 
 **这里能防的和不能防的**（`auth.mjs` 头注释已写明，不再假装更多）：
 能防浏览器里的网页（含被注入的 XSS）读写你的本地数据；
@@ -113,19 +115,22 @@
 `src/core/registry.ts` 是**全站唯一扩展点**：
 
 ```ts
-registerModule(mod)      // :17  登记（id 重复会告警并覆盖）
-getModules()             // :25  按 order 升序，并把 visible() 为 false 的滤掉
-getPinnedModules()       // :36  没有 category 的（置顶区）
-getGroupedModules()      // :46  按 MODULE_GROUPS 归组，空组不下发
-collectRoutes()          // :55  汇总各模块路由，交给 vue-router
+registerModule(mod)      // 登记（id 重复会告警并覆盖）
+getModules()             // 按 order 升序返回所有「可见」的功能（visible() 为 false 的滤掉）
+getModule(id)            // 取单个
+getGroupedModules()      // 按 MODULE_GROUPS 归组；空组不下发，组的先后由组的 order 决定
+collectRoutes()          // 汇总所有功能的路由，交给 vue-router
 ```
 
-侧边栏（`src/shell/AppShell.vue:16-20`）、首页卡片（`src/views/HomeView.vue`）、
-路由表（`src/router/index.ts:93`）三处**全部由它派生**，没有一处手写模块清单。
+`registerModule()` 里还有两条**启动告警**（都是「页面好好的、导航里找不到」那类最难查的错）：
+功能没写 `category`、或 `category` 不在 `MODULE_GROUPS` 里，注册时就喊一声。
+
+侧边栏（`src/shell/AppShell.vue`）、首页卡片（`src/views/HomeView.vue`）、
+路由表（`src/router/index.ts`）三处**全部由它派生**，没有一处手写模块清单。
 
 ### 2.2 一个模块要交什么
 
-`WorkstationModule`（`src/core/types.ts:43-70`）：
+`WorkstationModule`（`src/core/types.ts`）：
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
@@ -133,8 +138,8 @@ collectRoutes()          // :55  汇总各模块路由，交给 vue-router
 | `name` / `description` | ✓ | 中文名与一句话说明（侧边栏 / 卡片显示） |
 | `icon` | ✓ | Element Plus 图标组件名（大写开头）或 emoji；**用图标名就必须在 `src/main.ts` 的白名单里** |
 | `color` | | 卡片主色 hex，只做点缀 |
-| `category` | | `growth`/`office`/`study`/`todo`/`campus`；不填 = 置顶入口 |
-| `order` | | 越小越靠前 |
+| `category` | ✓ | `local`（本机）/ `office`（日常）/ `study`（学习）/ `ai`（智能体）/ `tools`（工具）；**不填或写错 = 功能从导航里静默消失** |
+| `order` | | 越小越靠前（先比组，再比组内） |
 | `homePath` | ✓ | 点击卡片 / 侧边栏进哪 |
 | `routes` | ✓ | 子路由（绝对路径）；带 `meta.title` 的自动进二级菜单，`meta.hideInNav` 不进 |
 | `visible()` | | 返回 false 就隐藏（**内核级约定：没配 = 不显示**） |
@@ -154,13 +159,24 @@ collectRoutes()          // :55  汇总各模块路由，交给 vue-router
 
 `visible()` 是**同步**的，而配置得从边车异步取。两者靠 `src/core/appconfig.ts` 调和：
 
-- 启动时 `loadAppConfig()` 取一次整包存进内存（`:27`）；
-- `cfgGet(path)` / `cfgFilled(path)`（`:41`、`:52`）只读内存；
+- 启动时 `loadAppConfig()` 取一次整包存进内存；
+- `cfgGet(path)` / `cfgFilled(path)` 只读内存；
 - 配置还没到手（或边车根本没起来）时 `cfgFilled` 一律返回 `true` —— 慢启动期间侧边栏
   不该闪一下又变。
 
-于是模块只写一句 `visible: () => cfgFilled('wiki.dir')` 就行（`src/features/wiki/module.ts:23`），
-**不要每个页面各自判空**。当前只有两处用它：`wiki`（要库目录）、`memo`（要转写端点）。
+于是模块只写一句 `visible: () => cfgFilled('wiki.dir')` 就行，
+**不要每个页面各自判空**。现在有三处在用它：
+
+| 模块 | 门槛 | 没配时会怎样 |
+|---|---|---|
+| `wiki`（知识库） | `cfgFilled('wiki.dir')`（要库目录） | 从侧边栏隐藏 —— 一个库都没有时进去也只能看空页 |
+| `memo`（语音随记） | `cfgGet('asr.provider') !== 'none' && cfgFilled('asr.baseUrl')`（要转写端点） | 从侧边栏隐藏 —— 没有转写后端，这个模块一行都用不了 |
+| `news`（资讯） | `cfgFilled('collector.dir')`（要采集器产物目录） | 从侧边栏隐藏 —— 采集器是另一个进程，产物目录没配就永远是空的 |
+
+反面例子是**做题本**：它**故意不设门槛**。题目本让智能体直接灌题就能用，
+题库池（`zuotiben.pool.*`）只是「推荐同类题」的加分项 —— 这种「功能本身能跑、只是少一档能力」
+的情况，应该由页面出空态、由接口回一句「没配题库目录」，而不是把整个功能从导航里藏掉
+（藏掉的话，没买题册的人连题目本都找不到）。
 
 ### 2.5 内核自带的东西（不属于任何模块）
 
@@ -172,9 +188,11 @@ collectRoutes()          // :55  汇总各模块路由，交给 vue-router
 | `/dev-guide` | `DevGuideView.vue` | 三步上手 + 「要自己接的几处」 |
 | `*` | `NotFoundView.vue` | 404 |
 
-内核还提供：`src/core/storage.ts`（`workstation.*` 命名空间的 localStorage 封装，主题与侧边栏
-状态存这里）、`src/core/ui.ts`（`light/dark/auto` 主题）、
-`src/components/{PageHeader,EmptyState,MdLite,SidecarOffline}.vue`。
+内核还提供：`src/core/storage.ts`（`workstation.*` 命名空间的 localStorage 封装，主题、侧边栏与置顶
+状态存这里）、`src/core/ui.ts`（**主题四档** + 手机档 + 侧边栏状态，见 §2.7）、
+`src/core/leaf-pages.ts`（导航树模型，见 §2.7）、
+`src/components/{PageHeader,EmptyState,MdLite,SidecarOffline}.vue`，
+以及 `src/ai/`（统一 AI 套件，规约见 `docs/ai-ui.md`）。
 
 `src/features/settings/` 里的 `LlmSection` / `EmbeddingSection` / `SearchSection` 是
 **设置页的段落组件，不是模块**（没有 `module.ts`、不注册），所以不出现在侧边栏。
@@ -184,11 +202,56 @@ collectRoutes()          // :55  汇总各模块路由，交给 vue-router
 `src/router/index.ts`：
 
 - **chunk 失效自愈**：页面开着的时候重新 `npm run build` 过，dist 里的 chunk 名全换了。
-  旧文件名会命中边车的 404（静态资源**不**回落 index.html，`server/index.mjs:1160`），
+  旧文件名会命中边车的 404（静态资源**不**回落 index.html，`server/index.mjs:1292`），
   浏览器报 MIME/chunk 错误，vue-router 静默失败 —— 表现是「点了没反应，刷新才行」。
-  `router.onError` 认这类错误后记住目标路径并重载一次（`:67-88`），10 秒内只重载一次。
+  `router.onError` 认这类错误后记住目标路径并重载一次（`src/router/index.ts` 的 `onError` 分支），
+  10 秒内只重载一次。
 - **hash 路由**：`createWebHashHistory()`。纯静态部署不需要任何重写规则，
   边车也只需要把无扩展名的路径回落 `index.html`。
+
+### 2.7 导航模型与主题 / 手机档（内核级的三处「一个决定，全站生效」）
+
+这三样都不属于任何功能模块，但每个页面都会碰到；改动它们等于改全站，所以集中写清。
+
+#### 侧边栏导航模型：叶子页面与置顶（`src/core/leaf-pages.ts`）
+
+- **侧边栏是一棵树**：大分组（`MODULE_GROUPS`）→ 功能行 → 二级页。一条功能行**有子页面**
+  就带展开箭头（点它连带展开），**没有子页面**就是「叶子页面」（点它直接打开这一页）。
+- **只有叶子页面能置顶**（2026-09-28 定的规矩）：带箭头的是「入口」，把入口也置顶，
+  顶部就会变成和下面分组一样的父级堆，反而更难找。
+- **判据只有一处**：`leaf-pages.ts` 的 `subRows()` / `hasSubRows()` / `leafPages()`。
+  侧边栏（`AppShell.vue`）与「全部应用」（`HomeView.vue`）**共用**它。
+  ⚠️ **别再按「路由 path 的前缀」判叶子**（那是这轮之前的写法，两个方向都翻过车）：
+  ① 子页不在同一前缀下时（`/todo` 与 `/paper/plugins` 这种）会把入口判成叶子、多出一颗图钉；
+  ② 反方向：单页功能的路由都标了 `hideInNav`，前缀写法会把它们全排除在叶子之外 ——
+  规划台 / 做题本 / 知识库这些**最该置顶的页面反而没有图钉**。
+- **置顶是用户手动挑的**：`ui.pinnedPages`（path 数组，顺序 = 点进来的顺序）；
+  `RECOMMENDED_PINS`（做题本 / 每日一句 / 单词练习 / 规划台 / 资讯）只是
+  **从没点过置顶时的默认值**，设置页那颗「用推荐置顶」读的也是它。用户自己点过之后，
+  默认值不会再回头覆盖他的选择。
+- 收起侧栏时置顶行**只剩图标**，所以每一行都必须有图标（这是 `check:nav` 的断言之一）。
+
+#### 主题四档（`src/core/ui.ts` 的 `ThemeMode`）
+
+| 档位 | 含义 | 备注 |
+|---|---|---|
+| `auto`（**默认**） | **按时间**自动：默认 19:00 转暗、07:00 转亮（设置页可改，支持跨零点） | 「现在算不算晚上」由本地时间回答，而不是外包给操作系统 |
+| `light` / `dark` | 人工指定，一直用它 | — |
+| `system` | 跟随操作系统的深浅色偏好（`prefers-color-scheme`） | 保留的老行为：想听系统的就用这档 |
+
+两个变量同时驱动：`html[data-theme]`（本站自己的令牌）与 `html.dark`（Element Plus 的暗色变量）。
+「跨零点」要按 `[from, 24:00) ∪ [0, to)` 处理 —— 写成单个 `[from, to)` 区间会让整夜都不生效。
+
+#### 手机档（`ui.isMobile`，断点 760px）
+
+- 断点常量 `MOBILE_MAX` 在 `ui.ts`，**必须与 `AppShell.vue` 的媒体查询一致**：
+  CSS 管样式、`isMobile` 管行为（抽屉开合、宽表换卡片），两处不同步就会出现
+  「样式已经是手机版、逻辑还当桌面」的错位。
+- 侧边栏在手机档变成**抽屉**（`navOpen`，刻意不持久化：每次进来都该是关的）；
+  宽表换成 `.ws-cards` 卡片（写法见 [design-system.md](design-system.md) §7）。
+- 防回归：`npm run check:mobile`（逐路由断言没有横向溢出）、`npm run check:nav`、
+  `npm run check:dark`、`npm run check:theme` —— 四条都需要**起边车 + 本机 Chrome/Edge**，
+  所以不进 CI，在真机上跑（见 [verifying.md](verifying.md)）。
 
 ---
 
@@ -198,26 +261,28 @@ collectRoutes()          // :55  汇总各模块路由，交给 vue-router
 
 ```
 模块顶层
-  ├─ loadConfig()                                  :40      读 config.json + credentials.json 并合并
-  ├─ migrateScopedConfig() + syncConfigMirrors()    :42-48   一次性迁移 / 只读镜像同步
-  ├─ PORT = WS_PORT || cfg.port || 5278             :49
-  └─ 清掉 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY，设 NO_PROXY=*   :55-58
+  ├─ loadConfig()                                   :47     读 config.json + credentials.json 并合并
+  ├─ migrateScopedConfig() + syncConfigMirrors()     :48-55  一次性迁移 / 只读镜像同步
+  ├─ PORT = WS_PORT || cfg.port || 5278              :56
+  └─ 清掉 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY，设 NO_PROXY=*    :59-65
         理由：本机边车的出网目标都是公网直连，终端/沙箱注入的代理会把请求截到本地代理
         端口；轻则慢，重则让用量缓存的定时同步整轮静默失败（页面拿到空缓存）。
 
-startServer()                                       :1184
-  ├─ ① 单实例闸 singleton.enforce()                  :1186   （见 §4.1）
-  ├─ ② http.createServer(...)                        :1196   每个请求：CORS → Origin 闸 →
+startServer()                                        :1323
+  ├─ ① 单实例闸 singleton.enforce()                   :1324  （见 §4.1）
+  ├─ ② http.createServer(...)                         :1333  每个请求：CORS → Origin 闸 →
   │                                                          OPTIONS → 令牌闸 → /mcp →
   │                                                          路由表 → 404 / 静态
-  ├─ ③ server.listen(PORT, '127.0.0.1')              :1262
-  └─ ④ listen 回调里按顺序点亮子系统                  :1262-1318
+  ├─ ③ server.listen(PORT, '127.0.0.1')               :1399
+  └─ ④ listen 回调里按顺序点亮子系统                   :1399 起
        ├─ 打印端口 / 配置路径 / 静态或开发态 / MCP / 访问控制状态
-       ├─ wikiQueue.startScheduler()                 :1277   源目录监听（默认关）
-       ├─ usageCache.startSync()                     :1291   用量缓存两级定时同步
-       ├─ setTimeout(refreshOverview, 2000)          :1296   看板数据预热（结果落盘）
-       └─ try { pguard.start() }                     :1304   进程守护引擎
+       ├─ wikiQueue.startScheduler()                  :1417  源目录监听（默认关）
+       ├─ usageCache.startSync()                      :1428  用量缓存两级定时同步
+       ├─ setTimeout(refreshOverview, 2000)           :1433  看板数据预热（结果落盘）
+       └─ try { pguard.start() }                      :1442  进程守护引擎
 ```
+
+（行号是 2026-09-30 核对 0.2.0 时的值；真要看细节按函数名 grep，别硬记数字。）
 
 **为什么 pguard 放在最后、还整体 try 住**：它不该把前面的子系统拖下水。
 这个回调里早先踩过「一步抛异常、后面整段被跳过」的坑 —— 静态资源与别的东西都在这同一个
@@ -236,12 +301,12 @@ startServer()                                       :1184
 
 ### 3.3 收尾与异常
 
-- `process.on('SIGINT')` → 打印一行并 `exit(0)`（`:1335`）。
-- `uncaughtException` / `unhandledRejection` → 只记日志，**不退出**（`:1329-1334`）。
+- `process.on('SIGINT')` → 打印一行并 `exit(0)`（`:1472`）。
+- `uncaughtException` / `unhandledRejection` → 只记日志，**不退出**（`:1466-1471`）。
   这是有意的：一次未捕获异常不值得把整个工作台干掉。
-- 每个路由处理器抛异常时**分发处兜底**（`:1239-1253`）：已发响应头就 `res.destroy()`，
+- 每个路由处理器抛异常时**分发处兜底**（`:1378` 一带）：已发响应头就 `res.destroy()`，
   没发头就回 500 JSON。没有这层兜底，请求会永远吊着、页面一直转圈 —— 比报错难查得多。
-- `EADDRINUSE` → 明确提示「改 config.json 的 port，或先关掉旧实例」后 `exit(1)`（`:1320-1327`）。
+- `EADDRINUSE` → 明确提示「改 config.json 的 port，或先关掉旧实例」后 `exit(1)`（`:1458`）。
 
 ### 3.4 启动姿势（都有哪些入口）
 
@@ -323,7 +388,7 @@ startServer()                                       :1184
 | 能力库 | `server/lib/panel.mjs`（`status()` 体检 / `enable()` / `disable()` / `remove()` / `sidecarStatus()`）· 编码与快捷方式在 `server/lib/autostart.mjs` |
 | 路由 | `GET /api/panel/sidecar`（当前进程）· `GET /api/panel/status`（自启位 + 体检）· `POST /api/panel/autostart`（`enable` / `disable` / `remove` / `open-startup`） |
 | 客户端 | `src/core/sidecar.ts` 的 `panelSidecar` / `panelStatus` / `panelAutostart` |
-| 页面 | `src/features/service/`（`module.ts` + `ServiceView.vue`），路由 `#/service`，**置顶区**（无 `category`） |
+| 页面 | `src/features/service/`（`module.ts` + `ServiceView.vue`），路由 `#/service`，`category: 'local'`（「本机」组） |
 
 「体检」是这一块的核心，分两级（`panel.status()`）：
 
@@ -346,8 +411,9 @@ startServer()                                       :1184
 
 ## 5. 为什么是「零依赖 Node 边车」
 
-**依赖事实**（`package.json`）：运行时只有 6 个包，全在前端
-（`vue` / `vue-router` / `pinia` / `element-plus` / `@element-plus/icons-vue` / `katex`）。
+**依赖事实**（`package.json`）：运行时只有 7 个包，全在前端
+（`vue` / `vue-router` / `pinia` / `element-plus` / `@element-plus/icons-vue` / `katex` /
+`vue-element-plus-x` —— 最后这个是 AI 界面的套件，见 `docs/ai-ui.md`）。
 `server/` 下 **0 个第三方依赖**，只 import `node:` 内置模块 ——
 实测用到的全部是：`crypto` `fs` `fs/promises` `http` `net` `os` `path` `url` `zlib`。
 `server/mcp.mjs` 的 JSON-RPC 是手写的子集，没引 MCP SDK。
@@ -375,7 +441,7 @@ startServer()                                       :1184
 | 取舍 | 换来了什么 | 代价 |
 |---|---|---|
 | 单进程、无数据库，数据是普通 JSON 文件 | 备份 = 目录拷走；出问题能直接打开文件看；没有迁移脚本 | 没有并发控制（靠 `jsonstore` 的 `rev` 乐观并发 + 后写覆盖留证）；数据量大时整份读写 |
-| 路由表是数组 + `RegExp` 逐条匹配（`index.mjs:1231`） | 零依赖、可读、加一条就是一行 | O(n) 匹配（当前 157 条，实测无感）；没有统一参数校验层，校验散在各处理器里 |
+| 路由表是数组 + `RegExp` 逐条匹配（`server/index.mjs` 的首条命中即停的匹配循环） | 零依赖、可读、加一条就是一行 | O(n) 匹配（当前 **199** 条 `route()` 注册，实测无感）；没有统一参数校验层，校验散在各处理器里 |
 | 同步写（`writeFileSync` + `renameSync`） | 同一进程内「Web 与 MCP 同时写」天然串行，不需要锁 | 真正的风险是进程被杀 / 磁盘满 —— 由原子写 + `.bak` + 每日快照 + `.corrupt` 留证兜 |
 | 模型输出预算集中在 `server/lib/llm.mjs` | 「思考 token 吃光正文」这类跨厂商问题只解一次 | 调用方不能自己拍 `maxTokens`；要新档位就改 `BUDGET`（`:27-34`） |
 | 边车同时发前端（生产态同源） | 部署 = 双击；不需要配反代 | 首屏与 API 抢同一个 HTTP/1.1 连接 |
@@ -407,9 +473,9 @@ startServer()                                       :1184
 
 | 类别 | 谁 | 表现 |
 |---|---|---|
-| 正确走 `config.mjs` 的 `dataDir()` | `dashboard.mjs:15,57,60`、`memo.mjs:26,32`、`index.mjs` 的 overview 磁盘缓存、`pguard.mjs` 的引擎目录（`<dataDir>/pguard`）、`scripts/seed-demo-data.mjs` | 正常跟随配置 |
-| 各自抄了一份同样的表达式 | `plan.mjs:19-20`、`summaries.mjs:29-30`、`usage-cache.mjs:19-20`、`vocab.mjs:38-39` | 认得 `WS_DATA_DIR`，但属复制粘贴，改一处会漏（`vocab.mjs:19` 的注释还专门提了这一点） |
-| 只读 `loadConfig().dataDir` | `english-daily.mjs:22`、`elevate.mjs:33`、`procscan.mjs:88`、`school-calendar.mjs:23`、`wiki-chat.mjs:25`、`wiki-embed.mjs:46`、`wiki-queue.mjs:28`、`wiki.mjs:75,274,1281`、`index.mjs:894` | **不认 `WS_DATA_DIR`** |
+| 正确走 `config.mjs` 的 `dataDir()` | `dashboard.mjs:57,60`、`memo.mjs:41,152`、`index.mjs` 的 overview 磁盘缓存、`pguard.mjs` 的引擎目录（`<dataDir>/pguard`）、`scripts/seed-demo-data.mjs` | 正常跟随配置 |
+| 各自抄了一份同样的表达式 | `plan.mjs:20`、`summaries.mjs:29`、`usage-cache.mjs:19`、`vocab.mjs:19,39` | 认得 `WS_DATA_DIR`，但属复制粘贴，改一处会漏（`vocab.mjs:19` 的注释还专门提了这一点） |
+| 只读 `loadConfig().dataDir` | `english-daily.mjs:22`、`elevate.mjs:32`、`procscan.mjs:88`、`school-calendar.mjs:24`、`wiki-chat.mjs:26`、`wiki-embed.mjs:45`、`wiki-queue.mjs:28`、`wiki.mjs:79,278,1293`、`index.mjs:876` | **不认 `WS_DATA_DIR`** |
 
 结论：`WS_DATA_DIR` 目前只在测试脚本与上表前两类模块里生效（第三类只认 `config.json` 的 `dataDir`）。
 把它当「一键把数据挪到别的盘」会失望 —— 要挪就改 `config.json` 的 `dataDir`，
@@ -425,13 +491,17 @@ startServer()                                       :1184
 | 位置 | 现象 | 状态 |
 |---|---|---|
 | `server/config.example.json` 的 `dataDir` 一项 | 该项的值曾写过一条**作者机器的绝对路径**（工作区下的 `server/data`），与本文件「全空默认」的声明、`.gitignore` 的意图都冲突。整项已从模板删掉，只留 `"// dataDir"` 说明键 —— 注意**不能填 `""`**：空串不是「用默认」，会让数据落到进程 cwd | **已修** |
-| `src/views/SettingsView.vue`（「本机文档解析工具」四个输入框）↔ `server/index.mjs` 的 `CONFIG_EDITABLE` | 页面把 `docparse.tools.{pandoc,soffice,python,pdftotext}` PATCH 上去，而白名单是 `docparse: ['mineru']` → 四个字段**永远会被拒**，页面只弹「已保存，但这些字段被拒绝：docparse.tools」。同类还有 `asr.*`（页面有转写后端那一栏，白名单里没有） | **未修**（见 [CONFIG.md](CONFIG.md) §4 与 §3.8） |
+| `src/views/SettingsView.vue`（「本机文档解析工具」四个输入框 + 转写后端那一栏）↔ 配置白名单 | 页面把 `docparse.tools.{pandoc,soffice,python,pdftotext}` 与 `asr.*` PATCH 上去，而白名单当时只放行 `docparse: ['mineru']` → **永远会被拒**，页面只弹「已保存，但这些字段被拒绝：…」 | **已修（2026-09-30）**：`server/lib/config-editable.mjs` 里 `docparse` 加了 `tools`、`asr` 整节都在表里（见 [CONFIG.md](CONFIG.md) §4） |
 | `src/features/office/CalendarView.vue`（课表层与教学周兜底） | **课表层恒为空**：它读 `overview.schedule.weekDays` / `overview.semester.week`，而 `grep -rn "schedule" server/*.mjs server/lib/*.mjs` 只命中 `scheduledImport`（配置项），`buildOverview()` 也不返回这两个字段。于是每天都是「这一天没有课」，「停课 N 节」「满课」图例永不出现；教学周仍正常（走校历那条路，`?? overview.schedule.week` 那段兜底是死代码）。模块描述里的「看课表」属超范围 | **未修**（要么接一个数据源，要么把它改成「校历视图」） |
 | `server/lib/wiki-llm.mjs` 的令牌来源说明 | 注释曾写「跟随工作台时交给 `newapi.aiProvider()`，它从另一个客户端的 provider 取」—— 那条跨应用读取通道**已经删掉**，注释已改成实际来源：`config.json` 的 `llm.activePresetId` + `newapi.baseUrl`、`credentials.json` 的 `llm.keys` | **已修** |
 | 看板模块的注释（`src/features/dashboard/module.ts`、`DashboardHome.vue`、`DashboardAI.vue`、`DashboardTrend.vue`） | 仍在解释「课表 / 待办 / 早报那几张卡的数据源为什么因人而异（各校接口 / 本机服务都不一样）」。这是**有意保留的设计说明**：告诉读者开源版只留骨架、卡怎么自己加。读的时候当设计说明看，不是残留 bug | 有意保留 |
 | `server/config.mjs` 的 `MIRROR_SECTIONS`（顶层 → `wiki.*` 的只读镜像） | 全站配置会同步一份带 `_mirror` 标记的副本到 `wiki.*`，文件里长期躺着两份值。这是历史迁移的残留。**改配置一律改顶层**，`wiki.*` 那几节会在下次启动被覆盖 | 未修（有意的向后兼容） |
 | `docs/design-system.md`（验收那一步） | 曾提到用两个已移除的截图脚本做验收 —— 那套截图工作流已随开源一起删掉；现在写的是「视觉改动自己截图看一眼」，验收方法指向 [verifying.md](verifying.md) | **已修** |
-| `src/views/DevGuideView.vue`（内核能力清单里的组件库那条） | 写着「Element Plus 已全量注册」—— 实际是 `unplugin-vue-components` 按需引入（`vite.config.ts` + `src/main.ts` 的注释），`main.ts` 里没有 `app.use(ElementPlus)` | **未修**（一句话的事，但改它要同时确认那一段的其它说法） |
+| `src/views/DevGuideView.vue`（内核能力清单里的组件库那条） | 写着「Element Plus 已全量注册」—— 实际是 `unplugin-vue-components` 按需引入（`vite.config.ts` + `src/main.ts` 的注释），`main.ts` 里没有 `app.use(ElementPlus)`（**2026-09-30 复查：这一句还在**） | **未修**（一句话的事，但改它要同时确认那一段的其它说法） |
+| `src/features/_template/module.ts`（模板里 `category` 那行的注释） | 注释仍写着**旧五组**「`growth / office / study / todo / campus`；不写 = 置顶入口」—— 而现在的分组是 `local / office / study / ai / tools`、且 `category` **必填**（不填会从导航里消失）。模板是给人抄的，这句会直接把人带偏（**2026-09-30 复查：未改**） | **未修**（`scripts/new-feature.mjs` 的 `--group` 校验若是同一份名单，要一起改） |
+| 本文档与 [FEATURES.md](FEATURES.md) / [CONFIG.md](CONFIG.md) 里的行号指针 | 这一轮代码位移不小（`server/index.mjs` 157 → 199 条路由、`server/mcp.mjs` 43 → 54 个工具、`server/config.mjs` 787 → 827 行），旧的行号指针整体偏移。2026-09-30 已按 0.2.0 重新核对启动顺序 / 鉴权握手 / 数据目录 / MCP 那几处，并给 §3.1 补了一句「行号以核对当日为准，看细节请按函数名 grep」 | **已修（2026-09-30）** |
+| `docs/每日一句导入.md`（句库格式那一段） | 文档按 `en` / `zh` / `words` 描述 `sentences.json`，而 `scripts/english-daily-build.mjs` 的**实际产物**是 `day` / `text` / `source` / `vocab[{term,pos,meaning}]` / `structure[]` / `refTranslation` / `grammar[]` —— 照着旧文档手写句库会整份读不出来 | **已修（2026-09-30）**（以代码为准重写了那一段，并注明字段名以 `english-daily-build.mjs` 的产物为准） |
+| `docs/EXTENDING.md`（模块字段表与 MCP 那节）与 `docs/TOP-DESIGN.md`（通道那节） | 两处还停在上一版：EXTENDING 把 `category` 写成可选、值是 `'growth' \| 'office' \| 'study' \| 'todo' \| 'campus'`（现在**必填**、五个分组是 `local / office / study / ai / tools`），并说 `server/mcp.mjs` 里「已有 43 个工具」（现为 54）；TOP-DESIGN 说「157 条 REST 路由」（现为 199） | **未修（2026-09-30 扫出）**：这两份不在本轮允许改动的文件里，已单独回报 —— 抄 EXTENDING 加模块的人会先被卡在 `category` 上 |
 | 全仓对本文档的引用大小写 | 本文档的正式名字是 **`ARCHITECTURE.md`**（大写）：Windows 上大小写不敏感、照旧能打开，Linux/macOS 或 GitHub 网页上小写会 404。全仓引用（文档、配置模板、脚本、页面文案）已统一为大写 | **已修**（2026-09-27） |
 
 > ⚠️ 这张表**原来那版数错了**：它写「全仓 10 处」并点名 `docs/PRIVACY.md` 的三处小写链接，
@@ -447,26 +517,35 @@ startServer()                                       :1184
   `npm ci` → `typecheck` → `npm test` → `parser-parity` → `build`。**刻意不跑** `test:pguard`
   与 `npm run server`（前者要真机的 powershell 采样、结果随机器状态变；后者会常驻）；
   也**不引入任何 linter / formatter**（见下一条）。
+  **2026-09-30 复查**：这五步没变；`build` 现在会先跑 `check:pages`（页面宽度门禁），
+  所以六条前端门禁里有**一条**顺带进了 CI —— 其余五条要「起边车 + 本机 Chrome/Edge」，不进 CI。
   LICENSE 见仓库根 `LICENSE`（MIT），第三方来源见 `THIRD-PARTY-NOTICES.md`；
   `CONTRIBUTING.md` 仍未单列 —— 那一段并进了 README 的「贡献 · 许可 · 从哪读起」，**不另开第三个事实源**。
-- **测试面仍然窄，但三条最脆的约定已经有护栏**：`npm test` 现在 4 个文件、36 个用例 ——
-  校历算法与抓取用的纯函数（`scripts/tests/core.test.mjs`）、单实例闸的匹配规则
-  （`scripts/tests/singleton.test.mjs`）、**配置白名单的三方对账**
-  （`scripts/tests/config-whitelist.test.mjs`：`DEFAULTS` ↔ 两张白名单 ↔ `config.example.json`）、
-  以及**注册表契约**（`scripts/tests/module-contract.test.mjs`：模块必须被注册、图标必须在
-  `src/main.ts` 的白名单里且两处一致、路由 path/name 唯一且懒加载、`visible()` 引用的配置项真实存在）。
-  后两个都是「漏了不报错、只表现为页面不对」的那类问题。
+- **测试面仍然窄，但最脆的几条约定已经有护栏**：`npm test` 现在 **5 个文件、46 个用例** ——
+  校历算法与抓取用的纯函数（`scripts/tests/core.test.mjs`，9）、单实例闸的匹配规则
+  （`scripts/tests/singleton.test.mjs`，5）、**配置白名单的三方对账**
+  （`scripts/tests/config-whitelist.test.mjs`，10：`DEFAULTS` ↔ 两张白名单 ↔ `config.example.json`）、
+  **注册表契约**（`scripts/tests/module-contract.test.mjs`，12：模块必须被注册、图标必须在
+  `src/main.ts` 的白名单里且两处一致、路由 path/name 唯一且懒加载、`visible()` 引用的配置项真实存在），
+  以及**转写热词的纠错**（`scripts/tests/memo-hotwords.test.mjs`，10）。
+  这些全是「漏了不报错、只表现为页面不对」的那类问题。
   零依赖边车天然适合 `node:test`，而 `jsonstore` 的原子写 / 回退链 / `rev` 冲突、
   `vocab` 的七种粘贴格式、`srs` 的 SM-2、`wiki` 的检索与 lint 都是纯函数或纯文件逻辑 ——
   **最该接着补的还是这四块**。
+- **六条前端门禁都只在真机上跑**：`check:pages`（构建前自动）以外的 nav / mobile / dark / theme / ai-ui
+  需要「在跑的边车 + 本机浏览器 + 真鼠标事件」，所以没进 CI。它们把「靠肉眼看的观感」
+  变成了可复跑的断言（思路见 [design-system.md](design-system.md) §7.1），
+  但**改版面的人得自己记得跑**。要进 CI 得先给它们一条「起边车 + headless 浏览器」的作业。
 - **前端体积没有被盯住**：`vite.config.ts:57` 把 `chunkSizeWarningLimit` 提到 1600，
   于是 300 KB 级的 entry chunk 不再触发构建告警；边车的静态服务也**不做压缩**
   （`serveStatic` 只 `createReadStream(file).pipe(res)`，响应里没有 `Content-Encoding`）。
   这是「本机访问、首屏无所谓」的取舍，但它意味着体积退化不会有人发现
   —— 实测数字与优化清单见 [PERFORMANCE.md](PERFORMANCE.md)。
-- **没有集中的外部工具依赖清单**：pandoc / LibreOffice / pdftotext / Python（+`python-pptx`、
-  `openpyxl`）/ MinerU 令牌各自散在 lib 注释里。缺工具时 `wiki-parse.mjs` 会点名
-  「缺哪个、用哪句话装」（`TOOL_HINTS`，`:31-36`），但没有一份「装哪几个才有完整功能」的总表。
+- **外部工具依赖清单是手写的**：pandoc / LibreOffice / pdftotext / Python（+`python-pptx`、
+  `openpyxl`）/ MinerU 令牌 / Chrome / edge-tts 各自散在 lib 注释里，缺工具时
+  `wiki-parse.mjs` 会点名「缺哪个、用哪句话装」（`TOOL_HINTS`，`:28` 起）。
+  「装哪几个才有完整功能」的总表现在有了一份（[FEATURES.md](FEATURES.md) §5），
+  但它是文档、不是 `where` 探活的落地检查 —— 装了却不在 PATH 的坑仍要自己填绝对路径。
 
 ---
 
@@ -490,7 +569,7 @@ startServer()                                       :1184
 5. **长任务一律「起任务 + 轮询」。** 转写、编译、下载都是分钟级，而 Node 的
    `requestTimeout` 默认 5 分钟 —— 在一个请求里等完，大文件必被掐。
    现成的两个实现：`memo.mjs` 的 jobs 状态机、`wiki-queue.mjs` 的入库队列。
-6. **边车的路由处理器抛异常必须自己接住**（分发处已加兜底，`index.mjs:1239-1253`）：
+6. **边车的路由处理器抛异常必须自己接住**（分发处已加兜底，`server/index.mjs:1378` 一带）：
    不接的话请求会永远吊着，页面一直转圈，比报错难查得多。
 7. **进程采样别塞 WMI。** 能自己算的用 Node 的 `os` + 两次快照做差；
    `Win32_OperatingSystem` 这类查询是几百毫秒级的，放进高频路径会把整页拖慢。
@@ -513,6 +592,11 @@ startServer()                                       :1184
   只能看到一半架构，所以整块没有带。
 - **对第三方客户端做逆向的本机工具链**：不做。需要转写就用标准的
   OpenAI 兼容 `/audio/transcriptions`（见 `server/lib/asr.mjs`）。
+- **资讯采集器本体**：不带。「资讯」页只读一个**产物目录**（契约 [news-contract.md](news-contract.md)），
+  采集（源清单、代理、浏览器自动化）是各人自己的事 —— 它跑在哪儿、用什么语言写都行，
+  只要产出那几个文件。仓库里只有一个抓公开 RSS 的最小示例 `scripts/collector-skeleton.mjs`。
+- **做题本的题库与句库原文**：不带。题干 / 解析 / 课件文本都是别人的版权物，
+  仓库只带容器（解析器 `kaproblems.mjs`、推荐 `zuotiben-suggest.mjs`、格式契约 [zuotiben-import.md](zuotiben-import.md)）。
 - **跨应用读别人的私有配置**：不读。密钥一律只在 `server/credentials.json` 一处。
 
 相关文档：[CONFIG.md](CONFIG.md)（配置与凭据逐项）、

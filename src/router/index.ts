@@ -76,6 +76,69 @@ function recoverFromStaleBuild(target?: string) {
   location.reload()
 }
 
+/* -------------------------------------------- 换版自愈（静态资源） --- */
+
+/**
+ * 入口 chunk 的文件名 —— 构建后的 index.html 里写着
+ * `<script type="module" src="/assets/index-XXXX.js">`，它就是这一页「出生时」的构建号。
+ * 开发态是 `/src/main.ts`，匹配不到就返回空：那时不做自愈（前端本来就在重建）。
+ */
+const ASSET_ENTRY_RE = /\/assets\/(index-[A-Za-z0-9_-]+\.js)/
+
+function pageBuildEntry(): string {
+  const el = document.querySelector('script[type="module"][src]')
+  return ASSET_ENTRY_RE.exec(el?.getAttribute('src') ?? '')?.[1] ?? ''
+}
+
+/** 边车**现在**发的那个入口名。现拉 index.html、不吃缓存 —— 要的就是「和手里这份不一样」 */
+async function servedBuildEntry(): Promise<string> {
+  const res = await fetch('/', { cache: 'no-store' })
+  if (!res.ok) return ''
+  return ASSET_ENTRY_RE.exec(await res.text())?.[1] ?? ''
+}
+
+/**
+ * `<img>` / `<link>` / `<script>` 加载失败的那一半自愈。
+ *
+ * chunk 那条走 `router.onError`；但这些是浏览器自己发的请求，404 不经过路由，
+ * 只会给页面留一个破图 —— 静默的，不刷新一直在。页面开着的时候重新 build，
+ * 旧页面手里的 `/assets/banner-…-<旧哈希>.webp` 就全 404，
+ * 症状就是「图片没加载出来」（2026-09-29 手机端报的那条走的就是这条路：
+ * 今天 dist 重建过好几次，手机上的页面常年开着，最容易攥着旧哈希）。
+ *
+ * 判据从严：**只有「页面手里的入口名」≠「服务端现在发的入口名」才重载**。
+ * 单个资源真缺了、或网络抖一下，只当没发生 —— 不会把好好的页面刷掉，也不会来回刷。
+ * 重载走 `recoverFromStaleBuild`：那里面有 10 秒一次的限制，两个自愈共用同一道闸。
+ */
+async function recoverIfBuildChanged() {
+  try {
+    const mine = pageBuildEntry()
+    if (!mine) return
+    const now = await servedBuildEntry()
+    if (now && now !== mine) recoverFromStaleBuild()
+  } catch {
+    /* 问不到服务端就不动：不动顶多是一张破图，乱刷会把用户手里的东西刷没 */
+  }
+}
+
+/** 资源失败的 error 事件**不冒泡**，只能在捕获阶段接；只认本站 `/assets/` 里的资源 */
+function installStaleAssetGuard() {
+  window.addEventListener(
+    'error',
+    (e) => {
+      const el = e.target as (HTMLElement & { src?: string; href?: string }) | null
+      // 脚本自己的运行时报错也走 error，但 target 是 window —— 那种与本条无关
+      if (!el || typeof el !== 'object') return
+      const url = el.src || el.href || ''
+      if (!url.startsWith(location.origin) || !url.includes('/assets/')) return
+      // 留一行线索：破图是静默的，没这行事后只能猜（手机上报不上来的时候更得靠它）
+      console.warn(`[stale] /assets/ 资源加载失败：${url}（页面构建 ${pageBuildEntry() || '未知'}）`)
+      void recoverIfBuildChanged()
+    },
+    true,
+  )
+}
+
 /** 上一次自愈重载前想去的那一页（读过即清，只补一次） */
 export function takeResumePath(): string | null {
   try {
@@ -97,6 +160,9 @@ export function createAppRouter() {
   router.onError((error, to) => {
     if (isChunkLoadError(error)) recoverFromStaleBuild(to?.fullPath)
   })
+
+  // 资源（图/样式/字体）那一半：挂在 window 上，和路由无关，但同属「换版自愈」一件事
+  installStaleAssetGuard()
 
   router.afterEach((to) => {
     const title = (to.meta.title as string | undefined) ?? '工作站'

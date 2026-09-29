@@ -301,6 +301,17 @@ export function scanGroupIcons(root = ROOT) {
   return { text, icons: new Set([...region.matchAll(/icon:\s*'([^']+)'/g)].map((m) => m[1])) }
 }
 
+/** MODULE_GROUPS 里定义的全部分组 id（category 对账用；与图标同一份来源） */
+export function scanGroupIds(root = ROOT) {
+  const text = fs.readFileSync(path.join(root, 'src', 'core', 'types.ts'), 'utf8')
+  const at = text.indexOf('export const MODULE_GROUPS')
+  if (at < 0) return []
+  const open = text.indexOf('= [', at)
+  const end = open < 0 ? -1 : matchBracket(text, text.indexOf('[', open), '[', ']')
+  const region = end > 0 ? text.slice(open, end) : ''
+  return [...region.matchAll(/id:\s*'([^']+)'/g)].map((m) => m[1])
+}
+
 /* --------------------------------------------------------- 锚点定位 --- */
 
 /** 找一行注释锚点，返回它所在行的起止下标（插入时应插在这一行**之前**） */

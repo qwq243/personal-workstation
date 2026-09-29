@@ -14,7 +14,7 @@ export const vocabModule: WorkstationModule = {
   icon: 'Notebook',
   color: '#4f46e5',
   category: 'study',
-  order: 30,
+  order: 11,
   homePath: '/vocab',
   badge: () => {
     const store = useVocabStore()

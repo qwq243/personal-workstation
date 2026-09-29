@@ -121,3 +121,38 @@ export function typesetMath(esc: string): string {
   out = out.replace(new RegExp(ENT, 'g'), () => entities[i++] ?? ENT)
   return out
 }
+
+/* --------------------------------------------- 只渲染 $...$ 的轻量版 --- */
+
+/**
+ * 只把 `$...$` / `$$...$$` 交给 KaTeX，其余文本转义后原样输出。
+ *
+ * 为什么单独一个：typesetMath 那套「裸上下标 + 公式 token 斜体」是为知识库正文设计的
+ * （中文里夹公式段），用在**普通英文文本**上会把 above-average 这种带连字符的词当公式排成斜体。
+ * 做题本的「每日一句」册只需要把译文里的 `$80\%$` 这类显式 LaTeX 排出来，
+ * 所以这里只认 `$` 定界符，别的什么都不动。
+ *
+ * breaks: 文本段里的换行转 `<br>`（结构划分那种逐行文本用）—— 不能靠 CSS 的
+ * `white-space: pre-line` 代替：KaTeX 输出的 HTML 里 span 之间自带换行，pre-line 会把
+ * 公式拆散，所以换行必须在**渲染前**就变成标签。
+ */
+export function renderDollarMath(text: string, opts: { breaks?: boolean } = {}): string {
+  const escape = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return String(text ?? '')
+    .split(/(\$\$[^$]+\$\$|\$[^$\n]+\$)/g)
+    .map((seg, i) => {
+      if (i % 2 !== 1) {
+        const t = escape(seg)
+        return opts.breaks ? t.replace(/\n/g, '<br>') : t
+      }
+      const block = seg.startsWith('$$')
+      const tex = block ? seg.slice(2, -2) : seg.slice(1, -1)
+      try {
+        return `<span class="wmd__katex">${katex.renderToString(tex, { throwOnError: false, displayMode: block })}</span>`
+      } catch {
+        return escape(seg)
+      }
+    })
+    .join('')
+}

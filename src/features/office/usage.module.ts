@@ -12,8 +12,8 @@ export const usageModule: WorkstationModule = {
   description: 'NewAPI 余额与消费：今天花了多少、哪个密钥在烧、跑的都是什么模型、有哪些异常请求。',
   icon: 'Coin',
   color: '#d97706',
-  category: 'office',
-  order: 22,
+  category: 'ai',
+  order: 21,
   homePath: '/office/usage',
   routes: [
     {

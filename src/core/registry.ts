@@ -10,13 +10,20 @@
  */
 import type { RouteRecordRaw } from 'vue-router'
 import type { ModuleGroupMeta, WorkstationModule } from './types'
-import { MODULE_GROUPS } from './types'
+import { MODULE_GROUPS, getModuleGroup } from './types'
 
 const registry = new Map<string, WorkstationModule>()
 
 export function registerModule(mod: WorkstationModule): void {
   if (registry.has(mod.id)) {
     console.warn(`[registry] 功能 id 重复，已覆盖：${mod.id}`)
+  }
+  // `category` 不填 / 写错，功能会**静默消失**在侧边栏与「全部应用」里（那里只渲染分组内的功能）。
+  // 这类「页面好好的、导航里找不到」最难查，所以注册时就喊一声。
+  if (!mod.category) {
+    console.warn(`[registry] 功能「${mod.name}」（${mod.id}）没有 category，不会出现在导航里`)
+  } else if (!getModuleGroup(mod.category)) {
+    console.warn(`[registry] 功能「${mod.name}」（${mod.id}）的 category 不存在：${mod.category}`)
   }
   registry.set(mod.id, mod)
 }
@@ -30,11 +37,6 @@ export function getModules(): WorkstationModule[] {
 
 export function getModule(id: string): WorkstationModule | undefined {
   return registry.get(id)
-}
-
-/** 不参与分组、固定在导航最上方的入口（当前是「进程守护」与「运行与自启」这两个本机服务类页面） */
-export function getPinnedModules(): WorkstationModule[] {
-  return getModules().filter((m) => !m.category)
 }
 
 export interface ModuleGroup {

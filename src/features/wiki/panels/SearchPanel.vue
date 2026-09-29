@@ -104,7 +104,7 @@ onMounted(async () => {
     </div>
 
     <div class="se__row">
-      <el-input v-model="q" placeholder="例：怎样训练看东西的眼力 / 比较法怎么练" clearable @keyup.enter="run" />
+      <el-input v-model="q" class="se__q" placeholder="例：怎样训练看东西的眼力 / 比较法怎么练" clearable @keyup.enter="run" />
       <el-select v-model="source" class="se__mode">
         <el-option label="库内" value="wiki" />
         <el-option label="网络" value="web" />
@@ -201,6 +201,21 @@ onMounted(async () => {
 .se__mode {
   width: 200px;
   flex: 0 0 auto;
+}
+
+/* 手机档：输入框 + 两个 200px select + 按钮合计约 700px，一行必然溢出。
+   让这一行换行：输入框独占一行，两个 select 平分下一行。 */
+@media (max-width: 760px) {
+  .se__row {
+    flex-wrap: wrap;
+  }
+  .se__q {
+    flex: 1 1 100%;
+  }
+  .se__mode {
+    flex: 1 1 130px;
+    width: auto;
+  }
 }
 .se__card {
   display: flex;

@@ -12,8 +12,19 @@ export interface ModuleStat {
   color?: string
 }
 
-/** 大模块分组标识。首页「全部应用」与侧边栏都按它归组；没有 category 的功能视为置顶入口（当前是「进程守护」与「运行与自启」）。 */
-export type ModuleGroupId = 'growth' | 'office' | 'study' | 'todo' | 'campus'
+/**
+ * 大模块分组标识。首页「全部应用」与侧边栏都按它归组。
+ *
+ * 分组的判据是**一句话能说清成员为什么在一起**：
+ *   本机 = 这台机器在跑的东西 · 日常 = 每天要看的执行面 · 学习 = 备考与资料 ·
+ *   智能体 = AI 那一侧（模型用量）· 工具 = 干杂事的器具。
+ * 只对某一台机器成立的分组（各自那套外部系统的入口）不带 —— 空组不下发，
+ * 留在表里只会让人以为哪儿还有入口。
+ *
+ * ⚠️ `category` 是**必填**：侧边栏与「全部应用」都只渲染分组里的功能，
+ * 不填就等于这个功能在导航里彻底消失（`registry.ts` 里加了启动告警兜这个坑）。
+ */
+export type ModuleGroupId = 'local' | 'office' | 'study' | 'ai' | 'tools'
 
 export interface ModuleGroupMeta {
   id: ModuleGroupId
@@ -26,21 +37,13 @@ export interface ModuleGroupMeta {
   color: string
 }
 
-/**
- * 大模块顺序即导航顺序：成长 → 办公 → 学习 → 待办 → 校内
- * （最后一组只是给校内类模块预留的空位，出厂没有模块用它）。
- *
- * 组的排序权重取 3/5/10/20/30 这样的**稀疏号段**，是为了给后来加的分组留插队位置
- * （想插在办公和学习之间就用 6~9）。单个模块的 `order` 同理：同组内按 10 上下递增留缝 ——
- * 办公组现值 看板 20、日历 21、用量 22、规划台 24、随记 26；学习组 vocab 30、wiki 31；
- * 置顶区（没有 category）guard 7、service 8。要插队就取中间的空号，不必重排别人。
- */
+/** 大模块顺序即导航顺序：本机 → 日常 → 学习 → 智能体 → 工具 */
 export const MODULE_GROUPS: ModuleGroupMeta[] = [
-  { id: 'growth', name: '成长', order: 3, icon: 'Opportunity', color: '#166534' },
-  { id: 'office', name: '办公', order: 5, icon: 'Briefcase', color: '#0f766e' },
+  { id: 'local', name: '本机', order: 2, icon: 'Monitor', color: '#64748b' },
+  { id: 'office', name: '日常', order: 5, icon: 'Sunny', color: '#0f766e' },
   { id: 'study', name: '学习', order: 10, icon: 'Reading', color: '#4f46e5' },
-  { id: 'todo', name: '待办', order: 20, icon: 'Finished', color: '#0ea5e9' },
-  { id: 'campus', name: '校内', order: 30, icon: 'Compass', color: '#8b5cf6' },
+  { id: 'ai', name: '智能体', order: 12, icon: 'Cpu', color: '#7c3aed' },
+  { id: 'tools', name: '工具', order: 14, icon: 'Tools', color: '#0891b2' },
 ]
 
 export function getModuleGroup(id: ModuleGroupId): ModuleGroupMeta | undefined {
@@ -54,7 +57,7 @@ export function getModuleGroup(id: ModuleGroupId): ModuleGroupMeta | undefined {
  * 目录约定（`src/features/` 下怎么摆文件）—— 照这个来，别照目录名猜
  *
  *   1. **一个目录装一个模块** → 模块定义就叫 `module.ts`。
- *      例：`dashboard/` `plan/` `vocab/` `wiki/` `memo/` `guard/` `service/`。
+ *      例：`dashboard/` `plan/` `vocab/` `wiki/` `memo/` `processguard/` `service/`。
  *      目录名与模块 `id` 保持一致（`id` 同时也是路由前缀与 localStorage 命名空间）。
  *
  *   2. **一个目录装多个模块** → 每个模块一个 `<模块 id>.module.ts`，**不要**出现 `module.ts`。
@@ -83,7 +86,8 @@ export interface WorkstationModule {
   icon: string
   /** 卡片主色，建议用 hex，如 '#4f46e5'。缺省使用主题主色 */
   color?: string
-  /** 所属大模块（成长 / 办公 / 学习 / 待办 / 校内）。不填 = 置顶入口，不参与分组 */
+  /** 所属大模块（本机 / 日常 / 学习 / 智能体 / 工具）。
+   *  **必填** —— 侧边栏与「全部应用」只渲染分组里的功能，不填这个功能就哪儿都不出现 */
   category?: ModuleGroupId
   /** 排序权重，越小越靠前 */
   order?: number
@@ -93,7 +97,7 @@ export interface WorkstationModule {
    *  带 meta.title 的路由会自动出现在侧边栏二级菜单里；
    *  不想出现在导航里的路由加 meta.hideInNav = true。 */
   routes: RouteRecordRaw[]
-  /** 可选：返回 false 时在侧边栏与首页隐藏该功能（例如依赖的环境不可用） */
+  /** 可选：返回 false 时在侧边栏与首页隐藏该功能（例如依赖的环境还没配 —— 见 core/appconfig.ts） */
   visible?: () => boolean
   /** 可选：向首页贡献若干指标数字 */
   stats?: () => ModuleStat[]

@@ -45,6 +45,13 @@ export const CONFIG_EDITABLE = {
   search: ['provider', 'apiKey', 'serpApiEngine', 'searXngUrl', 'searXngCategories', 'ollamaUrl', 'providerConfigs', 'defaultSource', 'maxResults', 'anyTxt'],
   docparse: ['mineru'],
   network: ['proxy'],
+  // 转写后端（语音随记）：设置页与随记配置页都能改；apiKey 按 SECRET_PATHS 落 credentials.json
+  asr: ['provider', 'baseUrl', 'model', 'language', 'timeoutSec', 'apiKey'],
+  // 资讯（采集器目录 / 抓评论的代理 / 「与我相关」关键词）
+  collector: ['dir', 'proxy'],
+  news: ['focusKeywords'],
+  // 做题本：题库池的三条路径
+  zuotiben: ['pool'],
   // 知识库自己的（强业务）：库目录、监听、队列上限
   wiki: [
     'dir',

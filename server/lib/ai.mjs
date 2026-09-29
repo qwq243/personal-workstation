@@ -11,6 +11,7 @@ import { loadConfig } from '../config.mjs'
 import * as schoolCalendar from './school-calendar.mjs'
 import * as plan from './plan.mjs'
 import * as vocab from './vocab.mjs'
+import { getDay as getProblemDay } from './zuotiben.mjs'
 
 /** 汇总「喂给模型的事实」。任何一块取不到都标记出来，不让模型猜。 */
 export async function gatherContext(date = todayStr()) {
@@ -36,6 +37,25 @@ export async function gatherContext(date = todayStr()) {
   ctx.plan = { plans: day.plans ?? [], notes: day.notes ?? [], mood: day.mood, done: day.done, tomorrow: day.tomorrow }
   ctx.streak = streak()
   ctx.recent = recentDays(7).map((d) => ({ date: d.date, plans: d.plans, done: d.plansDone, notes: d.notes }))
+
+  // 做题本：今天灌了几道题、在纸上做了几道。
+  // 放这里是有意的 —— 每日回顾（dailySummary）和今日行动建议（todayBrief）都走 gatherContext，
+  // 这样「题有没有跟上」每天都会被摆到台面上，而不是只在打开做题本时才看得见。
+  try {
+    const zt = getProblemDay(date)
+    if (zt.problems.length) {
+      const doneN = zt.problems.filter((p) => p.done).length
+      ctx.zuotiben = {
+        source: zt.source,
+        total: zt.problems.length,
+        done: doneN,
+        wrong: zt.problems.filter((p) => p.wrong).length,
+        undone: zt.problems.length - doneN,
+      }
+    }
+  } catch {
+    /* 读不到就不写这一节，别挡住别的 */
+  }
 
   try {
     const progress = vocab.readProgress()
@@ -83,6 +103,13 @@ function ctxToText(ctx) {
   if (p.done) L.push(`今天的复盘：${p.done}`)
   if (p.mood) L.push(`今天状态：${p.mood}/5 ${p.moodNote ?? ''}`)
   L.push(`连续记录天数：${ctx.streak}`)
+  if (ctx.zuotiben) {
+    const z = ctx.zuotiben
+    L.push(
+      `做题本（${z.source}）：共 ${z.total} 题，已在纸上做过 ${z.done} 题` +
+        `${z.undone ? `，还剩 ${z.undone} 题没做` : ''}${z.wrong ? `，其中错 ${z.wrong} 题` : ''}`,
+    )
+  }
   const r = ctx.recent.filter((d) => d.plans || d.notes)
   if (r.length) L.push(`近 7 天：${r.map((d) => `${d.date.slice(5)} 计划${d.plans}完成${d.done}笔记${d.notes}`).join('，')}`)
   if (ctx.vocab?.error) L.push('背单词：读不到进度')
@@ -151,11 +178,11 @@ export async function dailySummary({ date, force = false } = {}) {
 }
 
 /**
- * 今日行动建议：由「昨天的总结 + 今天的课表/待办/临近截止」推 3 条现在就能做的动作。
+ * 今日行动建议：由「昨天的总结 + 今天的计划、词单与做题进度」推 3 条现在就能做的动作。
  *
  * 和 dailySummary 的分工：
  *   dailySummary → 回顾「那天发生了什么」，第二天早上当昨天看；
- *   todayBrief   → 推荐今天怎么过，**综合口径**：课表空档 + 未完成待办 + 最近截止 + 备考阶段。
+ *   todayBrief   → 推荐今天怎么过，**综合口径**：未完成的计划 + 最近截止 + 备考阶段。
  *
  * 倒计时与项目进度从规划台（plan.json）现读进提示词，模型只负责判断与排序，
  * 不负责记日期 —— 它背日期必出错。输出的 markdown 只用 **加粗** 和列表（前端 MdLite 能渲染）。

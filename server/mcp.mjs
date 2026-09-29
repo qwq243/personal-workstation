@@ -22,6 +22,8 @@ import * as wiki from './lib/wiki.mjs'
 import * as wikiQueue from './lib/wiki-queue.mjs'
 import * as memo from './lib/memo.mjs'
 import * as hotwords from './lib/hotwords.mjs'
+import * as zuotiben from './lib/zuotiben.mjs'
+import * as zuotibenSuggest from './lib/zuotiben-suggest.mjs'
 
 const SERVER_INFO = { name: 'workstation', version: '0.1.0' }
 
@@ -553,6 +555,148 @@ const TOOLS = [
         category: { type: 'string', description: '换分类（id 或名字）；空串 = 清掉' },
         focus: { type: 'string', description: '这次想理清的重点 / 访谈提纲' },
         extract: { type: 'boolean', description: '从这条记录再学一遍热词' },
+      },
+    },
+  },
+  /* ----- 做题本（每日一题 + 英语每日一句；题目/句子的呈现与打印） ----- */
+  {
+    name: 'add_problems',
+    description:
+      '把题目写进「做题本」（每日一题）。**给用户题目一律走这个口，不要在回复里把一堆题聚合着发**：' +
+      '一题一条，题干放 stem，选项放 options，出处放 origin。同一天多次调用会接着往后编号，' +
+      '所以可以「先给 5 道、做完再给 5 道」。写进去后用户能在工作站 #/zuotiben 看，' +
+      '在 #/zuotiben/print 一题一页打印出来手写。\n' +
+      '两条硬规矩：① **answer 只写「填进题干空位」的那一小段**（选择题给 (A)，填空给结果值，' +
+      '解答/证明题留空）—— 页面会把它填进题干的（　）或 ______ 里，不再单独列一行「答案」；' +
+      '② **solution 按考研标准解析的规格写**：以「解」或「证明」起头，分步推、每步给依据，' +
+      '末尾落到结论；不要写「这题考什么」这种一句话提示。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'YYYY-MM-DD，默认今天' },
+        sourceLabel: { type: 'string', description: '册子来源，显示在页眉左边，如「某题册 基础篇」' },
+        note: { type: 'string', description: '这一册的备注（可选）' },
+        problems: {
+          type: 'array',
+          description: '题目列表，每一条：{ stem 必填, options[], origin, tag, kind, topic, answer, solution }',
+          items: {
+            type: 'object',
+            properties: {
+              stem: { type: 'string', description: '题干（可含 $...$ LaTeX）。选择/填空的题干要留出空位：`（　）` 或 `______`' },
+              options: { type: 'array', items: { type: 'string' }, description: '选项，如 ["A. 0", "B. 1"]' },
+              origin: { type: 'string', description: '出处，如「1997年2」或「某题册 第3章」' },
+              tag: { type: 'string', description: '题号里的日期标签，如「9.27」；不填按日期自动生成' },
+              kind: { type: 'string', enum: ['choice', 'fill', 'solve'], description: '不填按有没有选项猜' },
+              topic: { type: 'string', description: '考点/章节' },
+              answer: { type: 'string', description: '填进题干空位的那一小段：选择给 (A)，填空给结果值；解答/证明题留空' },
+              solution: { type: 'string', description: '考研规格的标准解析：以「解」/「证明」起头、分步给依据、末尾落结论' },
+            },
+            required: ['stem'],
+          },
+        },
+      },
+      required: ['problems'],
+    },
+  },
+  {
+    name: 'get_problem_sheet',
+    description:
+      '读「做题本」：某一天的题（或一段日期）。用来确认已经给过哪些题、别重复给，以及拿到 id 去回填答案/对错。' +
+      '返回里带页面地址（#/zuotiben?date=）与打印地址（#/zuotiben/print?date=）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'YYYY-MM-DD，默认今天' },
+        from: { type: 'string', description: '给这段就按范围读（与 to 一起），忽略 date' },
+        to: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'list_problem_days',
+    description: '列出做题本里有记录的日期（新到旧）与每天的题数、做过/做错统计。',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'update_problem',
+    description:
+      '改做题本里的一条题：标记做过/做错、回填答案与解析、写备注、改考点。攒 wrong=true 就是错题本。' +
+      'note 是**用户自己的备注/做错原因**，别拿它放解析 —— 解析走 solution，且要考研规格。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '题目 id（get_problem_sheet 里有）' },
+        date: { type: 'string', description: '题目所在日期，默认今天' },
+        done: { type: 'boolean', description: '是否已在纸上做过' },
+        wrong: { type: 'boolean', description: '是否做错' },
+        answer: { type: 'string', description: '填进题干空位的那一小段（选择给 (A)、填空给结果值）' },
+        solution: { type: 'string', description: '考研规格的标准解析' },
+        note: { type: 'string', description: '备注 / 做错原因' },
+        topic: { type: 'string', description: '考点' },
+        kind: { type: 'string', enum: ['choice', 'fill', 'solve'], description: '题型（用来纠正录入时猜错的情况）' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'get_problem_review',
+    description:
+      '读「做题本」的作答情况（默认今天或最近有记录的一天，可给日期/范围）：总数、做对/做错/还没做、' +
+      '按考点与按章的分布、**错题明细（含用户自己写的「为什么错」备注）**、错题出自哪几章、已做过的题 id。' +
+      '这是「给我总结一下今天做得怎么样」的事实底稿 —— 只给可核对的事实，结论你自己说。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'YYYY-MM-DD，默认最近有记录的一天' },
+        from: { type: 'string', description: '给范围就按范围读（与 to 一起）' },
+        to: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'get_problem_scope',
+    description:
+      '读「已学范围」—— 推荐题目时的过滤器。chapters 是题册基础篇的章号，' +
+      'lectures 是讲义讲次（两样都只是给人看的依据，推荐同类题按 chapters 筛）。',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'set_problem_scope',
+    description:
+      '写「已学范围」。核过视频进度/讲义之后写进来，之后 suggest_problems 就只在这些章里出题。' +
+      'note 写清依据（比如「看到第4讲，对应题册第2–4章」），人一眼能看出凭什么只推这几章。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chapters: { type: 'array', items: { type: 'number' }, description: '题册基础篇章号，如 [2,3,4]' },
+        lectures: { type: 'array', items: { type: 'number' }, description: '讲义讲次，如 [2,3,4]' },
+        note: { type: 'string', description: '依据说明' },
+      },
+    },
+  },
+  {
+    name: 'list_problem_pool',
+    description:
+      '题库池总览：配置里指的那两份材料（zuotiben.pool 的试题册 / 解析册）基础篇有哪些章、' +
+      '每章多少题、其中多少题解析齐全（解析缺的别推给人做）。没配题库目录时直接回「没配题库目录」。',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'suggest_problems',
+    description:
+      '推荐同类题：从题库池里挑候选题，**默认只挑已学范围里的、排掉做题本里已经做过的**，' +
+      '并把题干/选项/答案/解析/溯源一并给出。挑中的题原样喂给 add_problems 就进做题本了。\n' +
+      'basis：`wrong`＝按做错那几题所在的章找同类（「再练几道」用这个）；`scope`＝按已学范围铺开（默认）；' +
+      '`all`＝不限章（会混进没学的，慎用）。keywords 用考点词收窄，任一命中即可（题干或解析里出现）。\n' +
+      '注意：返回的 solution 是材料的原文（OCR 来的），可能带不好排版的写法，写进做题本前你可以顺手规范一下。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        basis: { type: 'string', enum: ['wrong', 'scope', 'all'], description: '默认 scope' },
+        chapters: { type: 'array', items: { type: 'number' }, description: '显式指定章号，优先级最高' },
+        keywords: { type: 'array', items: { type: 'string' }, description: '考点关键词，任一命中' },
+        excludeDone: { type: 'boolean', description: '排掉做题本里已做过的（默认 true）' },
+        limit: { type: 'number', description: '最多几道，默认 8' },
       },
     },
   },
@@ -1098,6 +1242,177 @@ ${lines.join('\n')}`, { data: r })
     if (!done.length) return ok('没给要改的东西：可以给 tags / category / focus / extract。', { data: {}, error: true })
     const record = memo.get(id)
     return ok(`已更新 ${record?.title ?? id}：\n· ${done.join('\n· ')}`, { data: { record } })
+  },
+
+  /* ----- 做题本（每日一题）：题目、作答总结、已学范围、题库池、推荐同类题 ----- */
+
+  async add_problems({ date, problems, sourceLabel, note } = {}) {
+    const r = zuotiben.addProblems({ date, problems, sourceLabel, note, source: 'agent' })
+    if (!r.ok) return ok(`写入失败：${r.error}`, { error: true })
+    const ns = r.added.map((p) => p.no).join('、')
+    const head = r.added.length
+      ? `已写进做题本 ${r.date}：新增 ${r.added.length} 题（第 ${ns} 题）`
+      : `已写进做题本 ${r.date}：更新 ${r.updated.length} 题`
+    return ok(
+      `${head}，这天共 ${r.total} 题。\n` +
+        `看：工作站 #/zuotiben?date=${r.date}　一题一页打印：#/zuotiben/print?date=${r.date}（Ctrl+P 存 PDF）`,
+      { data: { date: r.date, added: r.added, total: r.total } },
+    )
+  },
+
+  async get_problem_sheet({ date, from, to } = {}) {
+    if (from || to) {
+      const list = zuotiben.listRange({ from, to })
+      if (!list.length) return ok(`这段时间（${from || '开头'} ~ ${to || '现在'}）做题本里没有题`, { data: [] })
+      const lines = list.map(
+        (p) => `  ${p.date} 第${p.no}题${p.done ? (p.wrong ? ' ✗错' : ' ✓做过') : ''}${p.origin ? ` ${p.origin}` : ''} ${p.stem.slice(0, 60)}`,
+      )
+      return ok(`做题本 ${from || ''} ~ ${to || ''} 共 ${list.length} 题：\n${lines.join('\n')}`, { data: list })
+    }
+    const d = zuotiben.getDay(date)
+    if (!d.problems.length) return ok(`做题本 ${d.date} 还是空的`, { data: d })
+    const lines = d.problems.map(
+      (p) =>
+        `  [${p.id}] 第${p.no}题【${p.tag}】${p.origin ? ` ${p.origin}` : ''}${p.topic ? ` ⟨${p.topic}⟩` : ''}` +
+        `${p.done ? (p.wrong ? ' ✗做错' : ' ✓做过') : ''}\n      ${p.stem.replace(/\n/g, ' ').slice(0, 120)}`,
+    )
+    return ok(
+      `做题本 ${d.date}（${d.source}）共 ${d.problems.length} 题：\n${lines.join('\n')}\n\n` +
+        `看：#/zuotiben?date=${d.date}　打印：#/zuotiben/print?date=${d.date}`,
+      { data: d },
+    )
+  },
+
+  async list_problem_days() {
+    const days = zuotiben.listDays()
+    const s = zuotiben.stats()
+    if (!days.length) return ok('做题本还没有记录', { data: [] })
+    const lines = days.map((d) => `  ${d.date}　${d.total} 题（做过 ${d.done}，错 ${d.wrong}）　${d.source}`)
+    return ok(`做题本共 ${s.dayCount} 天 / ${s.total} 题（做过 ${s.done}，错 ${s.wrong}）：\n${lines.join('\n')}`, {
+      data: { days, stats: s },
+    })
+  },
+
+  async update_problem({ id, date, done, wrong, answer, solution, topic, note, kind, ref, origin } = {}) {
+    const patch = {}
+    if (typeof done === 'boolean') patch.done = done
+    if (typeof wrong === 'boolean') patch.wrong = wrong
+    if (typeof answer === 'string') patch.answer = answer
+    if (typeof solution === 'string') patch.solution = solution
+    if (typeof topic === 'string') patch.topic = topic
+    if (typeof note === 'string') patch.note = note
+    // kind 也允许纠正：录入时按题干猜错过（证明题被猜成填空），得能改回来
+    if (kind === 'choice' || kind === 'fill' || kind === 'solve') patch.kind = kind
+    /*
+     * ref（溯源）与 origin 也必须能改。
+     * 白名单是有意的（挡乱写字段），但**漏掉的字段会静默丢弃** ——
+     * kind 和 ref 各栽过一次，表现都是「接口回成功了、数据里却没有」。
+     * 以后加新字段，记得一起加到这里。
+     */
+    if (ref && typeof ref === 'object') patch.ref = ref
+    if (typeof origin === 'string') patch.origin = origin
+    const r = zuotiben.updateProblem({ date, id, patch })
+    if (!r.ok) return ok(`更新失败：${r.error}`, { error: true })
+    const p = r.problem
+    return ok(
+      `已更新 ${p.date} 第${p.no}题：${p.done ? (p.wrong ? '做过·做错' : '做过') : '未做'}` +
+        `${p.answer ? `　答案 ${p.answer}` : ''}${p.note ? `　备注 ${p.note.slice(0, 30)}` : ''}`,
+      { data: p },
+    )
+  },
+
+  async get_problem_review({ date, from, to } = {}) {
+    const r = zuotiben.review({ date, from, to })
+    if (!r.total) return ok(`做题本 ${r.range.from || date || ''} 还没有记录`, { data: r })
+    const lines = [
+      `范围：${r.range.from}${r.range.to && r.range.to !== r.range.from ? ` ~ ${r.range.to}` : ''}（${r.range.days} 天）`,
+      `共 ${r.total} 题：做对 ${r.right} · 做错 ${r.wrong} · 还没做 ${r.left}`,
+    ]
+    if (r.byChapter.length) {
+      lines.push(
+        '按章：' +
+          r.byChapter
+            .map((c) => `${c.title ? `第${c.chapter}章 ${c.title}` : c.topic}:${c.right}对/${c.wrong}错/${c.left}未做`)
+            .join('；'),
+      )
+    }
+    if (r.byTopic.length) {
+      lines.push(
+        '按考点：' + r.byTopic.map((t) => `${t.topic}:${t.right}对/${t.wrong}错`).join('；'),
+      )
+    }
+    if (r.wrongList.length) {
+      lines.push('错题：')
+      for (const w of r.wrongList) {
+        lines.push(`  ${w.date} 第${w.no}题 ${w.ref || w.topic || ''}${w.answer ? `（答案 ${w.answer}）` : ''}`)
+        if (w.note) lines.push(`      用户备注：${w.note}`)
+      }
+    }
+    if (r.wrongChapters.length) lines.push(`错题集中在第 ${r.wrongChapters.join('、')} 章`)
+    return ok(lines.join('\n'), { data: r })
+  },
+
+  async get_problem_scope() {
+    const s = zuotiben.getScope()
+    if (!s.chapters.length && !s.lectures.length) {
+      return ok('还没设已学范围（推荐同类题会不限章）。核过进度后用 set_problem_scope 写进来。', { data: s })
+    }
+    return ok(
+      `已学范围：题册基础篇 第 ${s.chapters.join('、') || '(未设)'} 章；讲义 第 ${s.lectures.join('、') || '(未设)'} 讲` +
+        (s.note ? `\n依据：${s.note}` : ''),
+      { data: s },
+    )
+  },
+
+  async set_problem_scope({ chapters, lectures, note } = {}) {
+    const r = zuotiben.setScope({ chapters, lectures, note })
+    return ok(
+      `已写已学范围：题册 第 ${r.scope.chapters.join('、') || '(空)'} 章；讲义 第 ${r.scope.lectures.join('、') || '(空)'} 讲`,
+      { data: r.scope },
+    )
+  },
+
+  async list_problem_pool() {
+    const p = zuotibenSuggest.poolInfo()
+    if (!p.configured) {
+      return ok(
+        `${p.hint}。\n` +
+          '题库池是「按章推荐同类题」用的：把试题册 / 解析册两份 markdown 放进一个目录，' +
+          '在配置里写 zuotiben.pool = { dir, problems, solutions } 就能用（格式要求见 docs/zuotiben-import.md）。',
+        { data: p },
+      )
+    }
+    const lines = [
+      `${p.book}：共 ${p.chapters.length} 章 / ${p.problems} 题（解析齐全 ${p.withSolution} 题）`,
+    ]
+    // 配了但文件不在 / 没解析出题：原因放在第一行下面，别藏在末尾（人一眼要能看出是哪种）
+    if (p.hint || p.empty) lines.push(p.hint || p.empty)
+    lines.push(
+      '按章（解析齐全/总）：' + p.chapters.map((c) => `第${c.chapter}章 ${c.withSolution}/${c.count} ${c.title}`).join('；'),
+    )
+    if (p.scope.chapters.length) lines.push(`已学范围：第 ${p.scope.chapters.join('、')} 章`)
+    return ok(lines.join('\n'), { data: p })
+  },
+
+  async suggest_problems({ basis, chapters, keywords, excludeDone, limit } = {}) {
+    const r = zuotibenSuggest.suggestProblems({ basis, chapters, keywords, excludeDone, limit })
+    if (!r.candidates.length) {
+      // 池子没配 / 文件不在时，原因在 poolHint 里 —— 别让人以为「题都用完了」
+      const why = r.poolHint ? `${r.why}；${r.poolHint}` : r.why
+      return ok(`没挑出候选题（${why}${r.keywords.length ? `；关键词 ${r.keywords.join('/')}` : ''}）。放宽关键词或确认范围。`, {
+        data: r,
+      })
+    }
+    const lines = [
+      `共 ${r.candidates.length} 道候选（${r.why}${r.keywords.length ? `；关键词 ${r.keywords.join('/')}` : ''}）`,
+      '这些题**已经在题库里、答案与解析都齐**，挑中的原样喂 add_problems 就进做题本：',
+    ]
+    for (const c of r.candidates) {
+      lines.push(
+        `  [${c.id}] ${c.ref.label}｜${c.kind}｜答案 ${c.answer || '(材料未给)'}\n      ${c.stem.slice(0, 100)}`,
+      )
+    }
+    return ok(lines.join('\n'), { data: r })
   },
 }
 

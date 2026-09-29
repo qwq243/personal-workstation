@@ -30,6 +30,7 @@ import {
   ROOT,
   registeredFiles,
   scanGroupIcons,
+  scanGroupIds,
   scanMainIcons,
   scanModules,
   scanRegistered,
@@ -216,7 +217,8 @@ test('模块 visible() 里 cfgFilled/cfgGet 引用的配置项都在 DEFAULTS �
 })
 
 test('模块 category 只能是 MODULE_GROUPS 里有的那几个', () => {
-  const allowed = new Set(['growth', 'office', 'study', 'todo', 'campus'])
+  // 真实来源是 core/types.ts 的 MODULE_GROUPS（这里读一遍，别再手抄一份）
+  const allowed = new Set(scanGroupIds(ROOT))
   const bad = real.filter((m) => m.category && !allowed.has(m.category)).map((m) => `${m.rel}（category=${m.category}）`)
   assert.deepEqual(bad, [], `分组 id 不在 MODULE_GROUPS 里，模块不会出现在任何分组：${bad.join('、')}`)
 })

@@ -818,6 +818,8 @@ const countOptions = computed(() => {
 }
 .actions {
   display: flex;
+  /* 三个 large 按钮在手机上合计超过一屏宽，允许换行；桌面够宽所以看不出差别 */
+  flex-wrap: wrap;
   gap: 12px;
   padding-top: 18px;
   margin-top: 6px;
@@ -889,7 +891,8 @@ const countOptions = computed(() => {
 
 /* -------------------------------------------------------------- 题面 --- */
 .quiz {
-  max-width: 760px;
+  /* 一次只做一道题：卡片居中收在 760，不跟着屏幕一起变宽（宽度有意收窄） */
+  max-width: 760px; /* page-narrow: 单卡练习，题面不铺满宽屏 */
   margin: 0 auto;
 }
 .quiz__instr {

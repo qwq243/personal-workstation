@@ -1,8 +1,10 @@
 /**
  * 语音随记：给一段音频 → 转成文字 → 自动起标题写摘要 → 落成一条可回看的记录。
  *
+ * 页面三个子页（`#/memo` 转写 / `#/memo/records` 记录 / `#/memo/settings` 配置）共用这一份服务端。
+ *
  * 任务模型（**通用**，与转写后端无关）：
- *   ① start  起一个任务：文件落盘、置 running、立刻返回 jobId（不在请求里等转写）
+ *   ① start  起一个任务：音频落盘、置 running、立刻返回 jobId（不在请求里等转写）
  *   ② poll   看任务：`GET /api/memo/job?id=` 拿进度；转写完成后**顺手把总结也做掉**，
  *            结果里带上记录 id —— 页面只需要轮询这一个接口
  *   ③ done   任务结束后写 records.json 与 records/<日期>-<slug>.md
@@ -11,20 +13,25 @@
  * 而 Node 的默认 requestTimeout 是 5 分钟，长音频必被掐。
  *
  * 转写后端是一个可换的 provider 接口，见 server/lib/asr.mjs
- * （出厂只带一个实现：OpenAI 兼容的 /audio/transcriptions）。这里不关心它是本机还是云端。
+ * （出厂只带一个实现：OpenAI 兼容的 /audio/transcriptions）。这里不关心它是本机还是云端，
+ * 也不依赖任何第三方客户端的私有接口 —— 换实现就是换 asr.baseUrl。
  *
  * 数据落 server/data/memo/：
  *   records.json             记录索引（createJsonStore，原子写 + .bak + 按天快照）
  *   records/<日期>-<slug>.md 单条记录的可读正文（摘要 + 原文）
- *   inbox/                   上传进来的原始音频（转写完不删，留着回放/重跑）
+ *   audio/                   上传进来的原始音频（转写完不删，留着回放/重跑；
+ *                            转写失败的那份也留在原地，记录里没挂上，可以手动清）
  *   hotwords.json            热词库：分类 → 词（词 + 常见错写别名），见 hotwords.mjs
  *   jobs.json                任务快照（边车重启后把死掉的 running 标 interrupted）
  *
- * 边界：不做录屏；不自动入知识库（页面给「复制 Markdown」）。
+ * 音频与正文是两处文件，别混：`record.file` 永远是 **md 正文**，`record.audio.file` 才是音频。
+ * 混过一次的后果是用「md 的路径」去喂 <audio>（也可回放接口读不到文件）。
+ *
+ * 边界：不做录屏；不自动入知识库（页面给「复制 / 导出 Markdown」）。
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { loadConfig, dataDir } from '../config.mjs'
+import { loadConfig, dataDir, saveConfig } from '../config.mjs'
 import * as hotwords from './hotwords.mjs'
 import { createJsonStore, todayStr } from './jsonstore.mjs'
 import { aiModels } from './newapi.mjs'
@@ -34,12 +41,13 @@ import * as asr from './asr.mjs'
 const MEMO_DIR = () => path.join(dataDir(), 'memo')
 const RECORDS_DIR = () => path.join(MEMO_DIR(), 'records')
 const RECORDS_FILE = () => path.join(MEMO_DIR(), 'records.json')
-const INBOX_DIR = () => path.join(MEMO_DIR(), 'inbox')
+/** 上传进来的原始音频都放这儿（按「时间戳-原文件名」命名，路径记在记录的 audio.file 上） */
+const AUDIO_DIR = () => path.join(MEMO_DIR(), 'audio')
 const JOBS_FILE = () => path.join(MEMO_DIR(), 'jobs.json')
 
-/** 记录库最多留这么多条（旧的连同 md 一起清掉） */
+/** 记录库最多留这么多条（旧的连同 md、音频一起清掉） */
 const KEEP_RECORDS = 300
-/** 内存里保留的任务条数（polll 用；落盘的那份只为「重启后对账」） */
+/** 内存里保留的任务条数（轮询用；落盘的那份只为「重启后对账」） */
 const KEEP_JOBS = 50
 
 /* ------------------------------------------------------------------ 设置 --- */
@@ -153,15 +161,22 @@ const store = createJsonStore({
 })
 
 function brief(record) {
+  // 音频文件可能被手动删掉（或换过盘）：报给页面前先核一遍在不在，
+  // 不然记录列表上带着 ♪、点开播放器却 404
+  const audio = record.audio?.file && fs.existsSync(record.audio.file) ? record.audio : null
   return {
     id: record.id,
     title: record.title,
     summary: record.summary,
     chars: record.chars,
-    durationSec: record.durationSec,
+    /** 音频时长（秒）：只有能从文件头算出来的时候才有，否则 null —— 页面按「未知」显示 */
+    durationSec: record.durationSec ?? null,
+    /** 转写本身花了多久（毫秒）—— 别把它当时长用，那是两件事 */
+    asrMs: record.asrMs ?? null,
     startedAt: record.startedAt,
     endedAt: record.endedAt,
     device: record.device,
+    model: record.model ?? null,
     type: record.type ?? 'oral',
     tags: record.tags ?? [],
     categoryId: record.categoryId ?? '',
@@ -171,9 +186,16 @@ function brief(record) {
     parts: (record.parts ?? []).length,
     hotwords: record.hotwords ?? [],
     newTerms: record.newTerms ?? [],
-    /** 有原始音频才能回放（上传的音频留在 inbox/，见 audioStream） */
-    audio: record.file && fs.existsSync(record.file) ? { bytes: fs.statSync(record.file).size } : null,
+    /** 有原始音频才能回放（见 streamAudio）。只下发名字与体积，绝对路径不出边车 */
+    audio: audio ? { bytes: audio.bytes, seconds: audio.seconds ?? null, name: audio.name ?? '' } : null,
   }
+}
+
+/** 记录上「用了哪些热词 / 学到哪些新词」两行摘要（页面与 Markdown 共用） */
+function hotwordLine(record) {
+  const used = (record.hotwords ?? []).map((x) => x.term).filter(Boolean)
+  const fresh = (record.newTerms ?? []).map((x) => x.term ?? x).filter(Boolean)
+  return { used, fresh }
 }
 
 export function list({ limit = 50 } = {}) {
@@ -185,10 +207,28 @@ export function get(id) {
   return record ?? null
 }
 
+/** 删一条记录留在这台机器上的两个文件（md 正文 + 原始音频）；不在了就当删过了 */
+function deleteRecordFiles(record) {
+  for (const file of [record?.file, record?.audio?.file]) {
+    if (!file) continue
+    try {
+      fs.unlinkSync(file)
+    } catch {
+      /* 文件不在了就算了 */
+    }
+  }
+}
+
 function put(record) {
   const data = store.read()
   const rest = data.records.filter((item) => item.id !== record.id)
   const next = { ...data, records: [record, ...rest].slice(0, KEEP_RECORDS) }
+  // 索引裁掉的那些记录：正文与音频也一起删，否则磁盘只涨不降
+  const kept = new Set(next.records.map((item) => item.id))
+  for (const item of data.records) {
+    if (kept.has(item.id)) continue
+    deleteRecordFiles(item)
+  }
   store.write(next, { baseRev: data.rev, source: 'memo' })
   return record
 }
@@ -209,26 +249,71 @@ export function remove(id) {
   if (!record) return { ok: false, error: `没有这条记录：${id}` }
   const data = store.read()
   store.write({ ...data, records: data.records.filter((item) => item.id !== id) }, { baseRev: data.rev, source: 'memo' })
-  if (record.file) {
-    try {
-      fs.unlinkSync(record.file)
-    } catch {
-      /* 文件不在了就算了 */
-    }
-  }
+  // 正文与音频跟着一起走：留个孤儿音频只会白占磁盘
+  deleteRecordFiles(record)
   return { ok: true, removed: id }
 }
 
 /* ------------------------------------------------------------ 转写后端 --- */
 
-/** 转写后端状态（透传 asr.mjs）：页面据此决定显示引导还是操作区 */
+/**
+ * 转写后端状态（透传 asr.mjs）：页面据此决定显示引导还是操作区。
+ *
+ * 顺带把「当前值」也带上（`timeoutSec` + 密钥末四位），配置页那一块要用；
+ * **明文密钥永远不下发** —— 页面能拿到就等于它进了浏览器历史、缓存、截图。
+ * 这样 `GET /api/memo/asr` 一条就够读写两端都用，不必再加一个「读配置」的口。
+ */
 export function asrStatus() {
-  return { ...asr.status(), audioExt: [...asr.AUDIO_EXT] }
+  const c = asr.conf()
+  return {
+    ...asr.status(),
+    audioExt: [...asr.AUDIO_EXT],
+    timeoutSec: c.timeoutSec,
+    keyHint: c.apiKey ? `****${c.apiKey.slice(-4)}` : '',
+  }
+}
+
+/** provider 就这两个值：openai = 走 OpenAI 兼容接口；none = 关掉转写（模块从侧边栏消失） */
+const ASR_PROVIDERS = new Set(['openai', 'none'])
+
+/**
+ * 写转写后端配置（配置页 → 转写后端）。
+ *
+ * 为什么不让页面直接 `PATCH /api/config`：那一套只放行 DEFAULTS 里声明过的子字段，
+ * 而 **asr.apiKey 不在 DEFAULTS 里**（它是敏感项，按 SECRET_PATHS 落 credentials.json）。
+ * 密钥要能在页面上改，就得由模块自己收下来。写入仍然走 config.mjs 的 saveConfig ——
+ * 脱敏串与空串会被它挡掉（避免「保存一次就把密钥清空」），落盘位置也还是那一套。
+ */
+export function setAsrBackend(patch = {}) {
+  const next = {}
+  if ('provider' in patch) {
+    const p = String(patch.provider ?? '').trim() || 'openai'
+    if (!ASR_PROVIDERS.has(p)) return { ok: false, error: `provider 只认 ${[...ASR_PROVIDERS].join(' / ')}` }
+    next.provider = p
+  }
+  if ('baseUrl' in patch) {
+    // 末尾的斜杠去掉：asr.mjs 会自己拼 `/audio/transcriptions`，多一条斜杠就是 404
+    next.baseUrl = String(patch.baseUrl ?? '').trim().replace(/\/+$/, '')
+  }
+  if ('model' in patch) next.model = String(patch.model ?? '').trim()
+  if ('language' in patch) next.language = String(patch.language ?? '').trim()
+  if ('timeoutSec' in patch) next.timeoutSec = Math.max(30, Number(patch.timeoutSec) || 600)
+  if ('apiKey' in patch) {
+    const key = String(patch.apiKey ?? '').trim()
+    // 留空 = 不改（要清掉就去 credentials.json 删 asr.apiKey）；脱敏串也不许覆盖真值
+    if (key && !key.startsWith('****')) next.apiKey = key
+  }
+  if (!Object.keys(next).length) return { ok: false, error: '没有要改的字段' }
+  const r = saveConfig({ asr: next })
+  if (r && r.ok === false) return { ok: false, error: r.error ?? '保存失败' }
+  return { ok: true, saved: Object.keys(next), ...asrStatus() }
 }
 
 /**
- * 把浏览器拖进来的音频落盘到 inbox/。
- * 文件名做一次清洗：只留基名、去掉路径分隔与可疑字符，避免 `../` 跑到目录外面。
+ * 把浏览器传上来的音频落盘到 `data/memo/audio/`。
+ *
+ * 文件名做一次清洗：只留基名、去掉路径分隔与可疑字符，避免 `../` 跑到目录外面；
+ * 前面再缀一个时间戳，同名的两次上传才不会互相覆盖。返回绝对路径（起任务时按它转写）。
  */
 export function stashUploadedAudio(name, buffer) {
   const safe = String(name || '')
@@ -237,11 +322,53 @@ export function stashUploadedAudio(name, buffer) {
     .trim()
   const base = safe || `audio-${Date.now().toString(36)}`
   const withName = path.extname(base) ? base : `${base}.wav`
-  const dir = INBOX_DIR()
+  const dir = AUDIO_DIR()
   fs.mkdirSync(dir, { recursive: true })
   const abs = path.join(dir, `${Date.now().toString(36)}-${withName}`)
   fs.writeFileSync(abs, buffer)
   return abs
+}
+
+/**
+ * 从 WAV 头里读时长（秒）；读不出来返回 null。
+ *
+ * 为什么只认 WAV：其它格式（mp3 / m4a / …）要算时长就得真解码，为一行元数据装个解码器不值得 ——
+ * 页面那边的播放器会从 `<audio>` 的元数据里拿到真实时长，这里只是让列表与 Markdown 先有个数。
+ * 偏移量按标准 PCM 头写：12 = "fmt "、28 = byteRate、44 = data 起点。
+ */
+function wavSeconds(file) {
+  let fd
+  try {
+    const size = fs.statSync(file).size
+    if (size < 44) return null
+    fd = fs.openSync(file, 'r')
+    const head = Buffer.alloc(44)
+    if (fs.readSync(fd, head, 0, 44, 0) < 44) return null
+    if (head.toString('ascii', 0, 4) !== 'RIFF' || head.toString('ascii', 8, 12) !== 'WAVE') return null
+    const byteRate = head.readUInt32LE(28)
+    if (!byteRate) return null
+    return Math.round(((size - 44) / byteRate) * 10) / 10
+  } catch {
+    return null
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd)
+      } catch {
+        /* 关不上就算了 */
+      }
+    }
+  }
+}
+
+/** 音频挂到记录上的形状：{file, name, bytes, seconds}。name 供页面显示/下载用 */
+function audioMeta(file, name) {
+  return {
+    file,
+    name: String(name || path.basename(file)),
+    bytes: fs.statSync(file).size,
+    seconds: wavSeconds(file),
+  }
 }
 
 /* ------------------------------------------------------------------ 任务 --- */
@@ -321,9 +448,13 @@ export function jobStatus(id) {
 }
 
 /**
- * 起一个转写任务。立刻返回 jobId，转写在后台跑。
+ * 起一个转写任务。立刻返回 jobId，转写在后台跑（转完顺手做总结、落成一条记录）。
  *
- * @param {{ path: string, name?: string, source?: string }} opts
+ * @param {{ path: string, name?: string, source?: string, type?: string, category?: string, focus?: string }} opts
+ *   path     = 音频文件（先用 POST /api/memo/upload 传上来，或自己放一个到 data/memo/audio/）
+ *   type     = 'interview' 走访谈骨架，其余（含不传）按设置里的默认类型
+ *   category = 热词分类名/id：定了就只用这一类的词表，不定则用设置里的默认分类
+ *   focus    = 这次想理清的重点 / 访谈提纲（成稿时做「问题对照」）
  */
 export function startTranscribe({ path: file, name, source = 'web', type, category, focus } = {}) {
   const st = asrStatus()
@@ -364,7 +495,12 @@ export function startTranscribe({ path: file, name, source = 'web', type, catego
   return { ok: true, job: briefJob(job) }
 }
 
-/** 跑完一个任务：转写 → 落成记录（顺带做总结） */
+/**
+ * 跑完一个任务：转写 → 落成记录（顺带做总结）。
+ *
+ * 失败时**不删音频**：那份还躺在 data/memo/audio/ 里，任务上只留 error（没落成记录），
+ * 页面据此提示重试；用户也可以在配置页的「存储」里看到它占的体积。
+ */
 async function runJob(job) {
   const r = await asr.transcribeFile(job.file, {})
   if (!r.ok) {
@@ -382,20 +518,36 @@ async function runJob(job) {
   const opts = settings()
   const picked = job.category ? hotwords.findCategory(job.category) : null
   const base = activeTerms(picked ? [picked.id] : opts.hotwordCategories)
+  /**
+   * 上传进来的那份音频挂到记录上（转写完**不删**：页面要回放、要重跑都靠它）。
+   * 转写后端只回整篇文字、没有段级时间戳，所以 `segments` 空着 —— 有没有它都不影响成稿，
+   * 见 finalTranscript()：拿不到时间轴就用整篇文本。
+   */
+  let audio = null
+  try {
+    audio = audioMeta(job.file, job.name)
+  } catch (err) {
+    console.warn(`[memo] 读不到音频元信息（不影响转写）：${err.message}`)
+  }
   const record = {
     id: job.id,
     title: '',
     summary: '',
     sections: [],
     transcript: r.text,
+    /** 转写后端不给段级时间戳（asr.mjs 只要正文），时间轴这一栏就永远是空的 */
     segments: [],
     chars: r.text.length,
     startedAt: job.startedAt,
     endedAt: Date.now(),
-    durationSec: Math.round((Date.now() - job.startedAt) / 1000),
+    /** 音频自己的时长（不是这次处理花了多久）；算不出来就是 null */
+    durationSec: audio?.seconds ?? null,
     device: null,
     source: job.source,
-    file: job.file,
+    /** 正文路径由 writeMarkdown 落成 records/<日期>-<slug>.md；音频在 audio/，别混 */
+    file: '',
+    audio,
+    asrMs: job.asrMs,
     errors: [],
     liveSummary: '',
     liveSummaries: [],
@@ -413,13 +565,23 @@ async function runJob(job) {
   }
 
   try {
-    if (record.transcript.trim().length >= 8) await summarizeRecord(record)
-    else {
+    if (record.transcript.trim().length >= 8) {
+      const s = await summarizeRecord(record)
+      // 总结失败（模型没配、超时、上游 504）不该把转写结果一起丢掉：
+      // 标题退回原文开头，失败原因留在记录里 —— 页面上能看到「这条为什么只有原文」，
+      // 也能自己点「重新总结」再试一次
+      if (!s.ok) {
+        record.title = record.title || fallbackTitle(record.transcript) || '未命名随记'
+        record.errors = [
+          { at: Date.now(), text: `自动总结失败：${s.error ?? '未知原因'}（可在「记录」页点「重新总结」再试）` },
+        ]
+      }
+    } else {
       record.title = fallbackTitle(record.transcript) || '未命名随记'
       record.summary = ''
     }
   } catch (err) {
-    // 总结失败不该把转写结果一起丢掉：记录照存，标题用兜底
+    // 抛出来的那条路径（网络层炸了之类）跟上面一样处理
     record.title = record.title || fallbackTitle(record.transcript) || '未命名随记'
     record.errors = [{ at: Date.now(), text: `自动总结失败：${err.message}` }]
   }
@@ -464,6 +626,56 @@ function chunkSegments(segments, limit = CHUNK_CHARS) {
   return chunks
 }
 
+/**
+ * 没有段级时间戳时，按句子把整篇文本切块（`start/end` 一律 null）。
+ *
+ * 为什么要这条兜底：转写后端只回整篇正文（OpenAI 兼容的 /audio/transcriptions 就是这样），
+ * `record.segments` 是空的 —— 早先长稿路径直接 `chunkSegments(record.segments)`，
+ * 于是**任何超过 LONG_THRESHOLD 的音频都报「没有可用的转写分段」，一句总结都出不来**。
+ * 切块只需要字数，不需要时间码：宁可少一个时间轴栏目，也不能整条总结不出来。
+ */
+function chunkText(text, limit = CHUNK_CHARS) {
+  const body = String(text ?? '').trim()
+  if (!body) return []
+  // 先按句末标点与换行切开，再按 limit 攒块；单句就超长的（无标点的长串）硬切
+  const pieces = body.split(/(?<=[。！？!?；;\n])/)
+  const chunks = []
+  let buf = ''
+  const flush = () => {
+    if (buf.trim()) chunks.push([{ start: null, end: null, text: buf.trim() }])
+    buf = ''
+  }
+  for (const piece of pieces) {
+    if (piece.length > limit) {
+      flush()
+      for (let i = 0; i < piece.length; i += limit) {
+        const part = piece.slice(i, i + limit).trim()
+        if (part) chunks.push([{ start: null, end: null, text: part }])
+      }
+      continue
+    }
+    if (buf && buf.length + piece.length > limit) flush()
+    buf += piece
+  }
+  flush()
+  return chunks
+}
+
+/** 长稿要切的块：优先用段级时间戳，没有就用整篇文本（见 chunkText 的注释） */
+function recordChunks(record) {
+  const segs = (record.segments ?? []).filter((s) => String(s?.text ?? '').trim())
+  if (segs.length) return chunkSegments(segs)
+  return chunkText(record.transcript)
+}
+
+/** 块的首尾时间码：没有时间戳（上传式转写）时给空串，别写 00:00 假装有时间轴 */
+function chunkRange(chunk) {
+  const first = chunk?.[0]?.start
+  const last = chunk?.[chunk.length - 1]?.end
+  if (!Number.isFinite(Number(first)) || first === null) return { startLabel: '', endLabel: '' }
+  return { startLabel: mmss(first), endLabel: mmss(last ?? first) }
+}
+
 /** 合并用的内部模板：各段详析已经写得很细，这里只要跨段的总览与清单 */
 const MERGE_INSTRUCTION = [
   '下面是同一份口述记录**按时间顺序**分段整理的结果。请把它们合并成一份完整的整理稿：',
@@ -492,7 +704,7 @@ function partMessages(record, chunk, index, total) {
     transcript: hotwords.applyAliases(timelineOf(chunk), recordTerms(record)).text,
     plain: chunk.map((seg) => String(seg.text ?? '').trim()).join('\n'),
     process: '',
-    duration: humanLen(record.durationSec),
+    duration: record.durationSec ? humanLen(record.durationSec) : '未知',
     chars: String(record.chars ?? ''),
     hotwords: hotwords.promptBlock(recordTerms(record)),
     categories: hotwords.list().categories.map((c) => c.name).join('、'),
@@ -518,7 +730,9 @@ function mergeMessages(parts) {
       const sections = (part.sections ?? [])
         .map((sec) => [`### ${sec.title}`, ...sec.items.map((item) => `- ${item}`)].join('\n'))
         .join('\n')
-      return [`## 第 ${i + 1} 段（${part.startLabel}~${part.endLabel}）`, sections || part.summary].join('\n')
+      // 有时间码就带上（模型合并时能排时间轴），没有就只写「第 N 段」
+      const range = part.startLabel && part.endLabel ? `（${part.startLabel}~${part.endLabel}）` : ''
+      return [`## 第 ${i + 1} 段${range}`, sections || part.summary].join('\n')
     })
     .join('\n\n')
   return [
@@ -531,9 +745,11 @@ function mergeMessages(parts) {
 }
 
 /**
- * 默认提示词模板（页面「提示词」弹窗可改；`{{transcript}}` 会被替换成转写原文）。
- * 分成四段是有意的：系统那段管「怎么对待这份转写」，用户那段管「输出什么形状」，
- * 滚动摘要单独一套（它要短、只要一句进展，不起标题）。
+ * 默认提示词模板（配置页「提示词」弹窗可改；`{{transcript}}` 会被替换成转写原文）。
+ * 两套骨架各两段，是有意的：系统那段管「怎么对待这份转写」，用户那段管「输出什么形状」——
+ * 口述要的是复盘清单（决定 / 待办 / 风险），访谈要的是逐字稿纪律（原话、编码、待追问）。
+ * 长稿（> LONG_THRESHOLD 字）的分段详析复用同一套模板，前面加一句「这是第 i/n 段」；
+ * 合并那一轮用的是模块内的 MERGE_INSTRUCTION（它要的是跨段总览，跟单段那两段不是一回事）。
  */
 export const DEFAULT_PROMPTS = {
   summarySystem:
@@ -627,11 +843,6 @@ export const DEFAULT_PROMPTS = {
     '- [mm:ss] 关键点（5~15 个，回听用）\n\n' +
     '只写材料里有的东西；不要输出 JSON 或代码块。\n' +
     '提醒：访谈是**证据**不是素材——会议纪要那套「替人总结成决定和待办」的写法会把研究价值洗掉，别那么写。',
-
-  liveSystem: '你在帮用户把正在进行中的口述记录压成一段进展。只依据原文，不编造，不用 emoji。',
-  liveUser:
-    '这是到目前为止的转写（可能还没说完）：\n{{transcript}}\n\n' +
-    '用 2-4 句说清「现在讲到哪、说了什么要点」，作为后续分析的线索留档；直接给内容，不要标题。',
 }
 
 const PROMPT_KEYS = Object.keys(DEFAULT_PROMPTS)
@@ -682,7 +893,13 @@ function humanLen(seconds) {
 
 /** 带时间轴的转写：`[mm:ss] 文本`。模型能据此给「时间轴」栏目，回听方便 */
 function timelineOf(segments, limit = 12_000) {
-  const lines = (segments ?? []).map((seg) => `[${mmss(seg.start)}] ${String(seg.text ?? '').trim()}`)
+  const lines = (segments ?? []).map((seg) => {
+    const text = String(seg.text ?? '').trim()
+    // 没有时间戳的块（上传式转写按句子切出来的）不挂 `[00:00]`：
+    // 那会让模型以为全文都发生在 0 秒，进而编出一串假时间码
+    if (seg.start === null || seg.start === undefined || !Number.isFinite(Number(seg.start))) return text
+    return `[${mmss(seg.start)}] ${text}`
+  })
   const text = lines.join('\n')
   return text.length > limit ? text.slice(-limit) : text
 }
@@ -715,7 +932,9 @@ function promptValues(record) {
     transcript: finalTranscript(record),
     plain: String(record.transcript ?? '').slice(-12_000),
     process,
-    duration: humanLen(record.durationSec),
+    // 时长是从音频文件头里读的（上传的 mp3/m4a 读不到）——读不到就写「未知」，
+    // 别把「0 秒」交给模型，那会让摘要里出现一句莫名其妙的时长
+    duration: record.durationSec ? humanLen(record.durationSec) : '未知',
     chars: String(record.chars ?? String(record.transcript ?? '').length),
     hotwords: hotwords.promptBlock(terms),
     categories: hotwords.list().categories.map((c) => c.name).join('、'),
@@ -788,12 +1007,14 @@ export function learnHotwords(record) {
     if (requireInText && !seenInText(term) && !(item.aliases ?? []).some(seenInText)) return
     items.push({ term, aliases: item.aliases ?? [] })
   }
-  // ① 总稿「术语与专名」栏最准：正名 ← 错写
+  // ① 总稿「术语与专名」栏最准：正名 ← 错写（要求至少一边在原文里出现过）
   for (const sec of record.sections ?? []) {
     if (!/术语|专名/.test(String(sec.title ?? ''))) continue
     for (const line of sec.items ?? []) push(parseTermLine(line) ?? {})
   }
-  // ② 标签：主题词本来就可能不逐字出现在原文里，只做形状检查
+  // ② 之前认到过的词：换过分类之后再「学热词」，它们要被收进新分类（不然只能重录一遍）
+  for (const item of record.newTerms ?? []) push(item)
+  // ③ 标签：主题词本来就可能不逐字出现在原文里（例如「先试一下」写成了别的说法），只做形状检查
   for (const tag of record.tags ?? []) push({ term: tag }, { requireInText: false })
 
   if (!items.length) {
@@ -917,10 +1138,13 @@ export function learnFromRecord(id) {
 /**
  * 把这条记录的原始音频按 Range 交给 `<audio>`。
  * 为什么自己写：浏览器拖进度条靠 206 + Content-Range，一次给完整文件的话每次跳都得重下。
+ *
+ * 注意取的是 `record.audio.file`（音频），不是 `record.file`（md 正文）—— 这两个字段差一个字，
+ * 拿错就成了「用 Markdown 文档当音频播」。
  */
 export function streamAudio(req, res, id) {
   const record = get(String(id ?? ''))
-  const file = record?.file ? path.resolve(record.file) : ''
+  const file = record?.audio?.file ? path.resolve(record.audio.file) : ''
   let size = 0
   try {
     if (!file || !fs.existsSync(file)) throw new Error('no file')
@@ -975,6 +1199,43 @@ export function streamAudio(req, res, id) {
   return 'handled'
 }
 
+/** 音频占用（配置页显示用）：audio/ 下所有文件的总量与条数 */
+export function audioUsage() {
+  let bytes = 0
+  let count = 0
+  try {
+    for (const name of fs.readdirSync(AUDIO_DIR())) {
+      try {
+        const st = fs.statSync(path.join(AUDIO_DIR(), name))
+        if (!st.isFile()) continue
+        bytes += st.size
+        count += 1
+      } catch {
+        /* 单个文件读不到就跳过 */
+      }
+    }
+  } catch {
+    /* 目录还没有 */
+  }
+  return { count, bytes, mb: Math.round((bytes / 1024 / 1024) * 10) / 10 }
+}
+
+/** 只删某条记录的音频（转写与整理稿留着），返回删完之后的占用 */
+export function removeAudio(id) {
+  const record = get(id)
+  if (!record) return { ok: false, error: `没有这条记录：${id}` }
+  if (record.audio?.file) {
+    try {
+      fs.unlinkSync(record.audio.file)
+    } catch {
+      /* 文件不在了就算了 */
+    }
+  }
+  record.audio = null
+  persist(record)
+  return { ok: true, ...audioUsage() }
+}
+
 export function prompts() {
   const current = customPrompts()
   return {
@@ -998,9 +1259,9 @@ export function prompts() {
 }
 
 /** 这几段正文模板必须留一个内容占位符，否则模型看不到转写 */
-const CONTENT_KEYS = new Set(['summaryUser', 'interviewUser', 'liveUser'])
+const CONTENT_KEYS = new Set(['summaryUser', 'interviewUser'])
 
-/** 保存提示词：只认这四个键；空串 = 该字段回默认；两个正文模板必须带 {{transcript}} */
+/** 保存提示词：只认这两套骨架（四个键）；空串 = 该字段回默认；正文模板必须带 {{transcript}} */
 export function setPrompts(patch = {}) {
   const next = {}
   for (const key of PROMPT_KEYS) {
@@ -1213,9 +1474,9 @@ export async function summarizeRecord(record, { model } = {}) {
  * 最后一次合并只看各段整理（不看原文），产出总标题与跨段清单。
  */
 async function summarizeLong(record, { useModel, signal, onEvent, setPhase, addReasoning }) {
-  const chunks = chunkSegments(record.segments)
+  const chunks = recordChunks(record)
   const total = chunks.length
-  if (!total) return { ok: false, error: '没有可用的转写分段' }
+  if (!total) return { ok: false, error: '这条记录没有可用的正文，没法分段' }
   const parts = []
 
   for (let i = 0; i < total; i += 1) {
@@ -1244,8 +1505,7 @@ async function summarizeLong(record, { useModel, signal, onEvent, setPhase, addR
       title: doc.title,
       summary: doc.summary,
       sections: doc.sections,
-      startLabel: mmss(chunk[0]?.start ?? 0),
-      endLabel: mmss(chunk[chunk.length - 1]?.end ?? 0),
+      ...chunkRange(chunk),
     })
     onEvent?.({ type: 'stage', phase: 'part', index: i + 1, total, title: doc.title })
   }
@@ -1297,7 +1557,7 @@ export async function summarizeStream({ id, model, onEvent, signal } = {}) {
     id: record.id,
     model: useModel ?? loadConfig().ai?.model ?? '',
     mode: isLong ? 'chunked' : 'single',
-    chunks: isLong ? chunkSegments(record.segments).length : 1,
+    chunks: isLong ? recordChunks(record).length : 1,
   })
 
   let deltas = 0
@@ -1451,15 +1711,21 @@ function clock(seconds) {
  */
 export function markdown(record) {
   const lines = [`# ${record.title || '未命名随记'}`, '']
-  lines.push(`- 时间：${stamp(record.startedAt)}（时长 ${clock(record.durationSec)}）`)
+  lines.push(`- 时间：${stamp(record.startedAt)}`)
+  // 时长只有从音频文件头里读出来才有（见 wavSeconds）：没有就不写「时长 00:00」这种假信息
+  if (record.durationSec) lines.push(`- 音频时长：${clock(record.durationSec)}`)
   lines.push(`- 字数：${record.chars}`)
+  if (record.asrMs) lines.push(`- 转写耗时：${(record.asrMs / 1000).toFixed(1)}s`)
+  if (record.audio?.name) {
+    const mb = Math.round(((record.audio.bytes ?? 0) / 1024 / 1024) * 10) / 10
+    lines.push(`- 原始音频：${record.audio.name}（${mb} MB）`)
+  }
   if (record.device) lines.push(`- 设备：${record.device}`)
   if (record.model) lines.push(`- 模型：${record.model}`)
   lines.push(`- 类型：${record.type === 'interview' ? '访谈' : '口述'}`)
   if (record.categoryName) lines.push(`- 分类：${record.categoryName}`)
   if ((record.tags ?? []).length) lines.push(`- 主题：${record.tags.join(' / ')}`)
-  const used = (record.hotwords ?? []).map((x) => x.term).filter(Boolean)
-  const fresh = (record.newTerms ?? []).map((x) => x.term).filter(Boolean)
+  const { used, fresh } = hotwordLine(record)
   if (used.length) lines.push(`- 热词命中：${used.join(' / ')}`)
   if (fresh.length) lines.push(`- 新学热词：${fresh.join(' / ')}`)
   lines.push('')
@@ -1477,7 +1743,9 @@ export function markdown(record) {
   if ((record.parts ?? []).length) {
     lines.push('## 分段详析', '')
     for (const part of record.parts) {
-      const head = `### 第 ${part.index} 段（${part.startLabel}–${part.endLabel}）`
+      // 没有时间码的分段（上传式转写）就别印「（）」里那对空括号
+      const range = part.startLabel && part.endLabel ? `（${part.startLabel}–${part.endLabel}）` : ''
+      const head = `### 第 ${part.index} 段${range}`
       lines.push(part.title ? `${head} ${part.title}` : head, '')
       if (part.summary) lines.push(part.summary, '')
       for (const sec of part.sections ?? []) {
@@ -1488,8 +1756,13 @@ export function markdown(record) {
     }
   }
   lines.push('## 转写原文', '')
-  for (const segment of record.segments ?? []) {
-    lines.push(`[${clock(segment.start)}-${clock(segment.end)}] ${segment.text}`)
+  if ((record.segments ?? []).length) {
+    for (const segment of record.segments) {
+      lines.push(`[${clock(segment.start)}-${clock(segment.end)}] ${segment.text}`)
+    }
+  } else if (String(record.transcript ?? '').trim()) {
+    // 转写后端只回整篇、没有段级时间戳时，整段贴出来就是 —— 别留下一个空标题
+    lines.push(String(record.transcript).trim())
   }
   return lines.join('\n') + '\n'
 }
@@ -1536,7 +1809,7 @@ export async function resummarize(id, { model } = {}) {
   return { ok: true, record: brief(stored), model: r.model, fallback: r.fallback ?? false }
 }
 
-/** 页面「环境」一栏用：这些目录在哪 */
+/** 配置页「存储」那一块用：这些目录都在哪（音频占用另走 audioUsage()） */
 export function dir() {
-  return { data: MEMO_DIR(), records: RECORDS_DIR(), file: RECORDS_FILE(), inbox: INBOX_DIR(), jobs: JOBS_FILE() }
+  return { data: MEMO_DIR(), records: RECORDS_DIR(), file: RECORDS_FILE(), audio: AUDIO_DIR(), jobs: JOBS_FILE() }
 }

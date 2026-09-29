@@ -2,7 +2,7 @@
 
 这份文档回答四件事：**哪些文件管什么、每个字段是什么意思、怎么改、什么绝对不能提交。**
 
-所有默认值的唯一事实源是 `server/config.mjs` 的 `DEFAULTS`（第 62–388 行）。
+所有默认值的唯一事实源是 `server/config.mjs` 的 `DEFAULTS`（该文件第 62–428 行）。
 本文逐项解释它；代码改动后请顺手改这里。
 
 ---
@@ -31,14 +31,14 @@ export const SECRETS_PATH = SERVER_DIR/credentials.json      // 敏感项单独�
 
 ### 2.1 合并与读取
 
-`loadConfig()`（`config.mjs:530`）的顺序：
+`loadConfig()`（`config.mjs`，第 570 行起）的顺序：
 
 ```
 readJSONFile(config.json)  ─┐
 readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► applySecrets() ─► 缓存到内存
 ```
 
-- `merge()` 是**深合并**，但**数组直接整体覆盖**（`config.mjs:405-413`）——
+- `merge()` 是**深合并**，但**数组直接整体覆盖**（`config.mjs` 的 `merge()`）——
   `allowedOrigins`、`watchDirs`、`models` 这类改动是替换而不是追加。
 - 结果缓存在模块内存里（`cached`）；`resetConfigCache()` 清缓存，`saveConfig()` 会重算。
 - 读配置一律用 `loadConfig()`；**不要再自己 `readFileSync` 这两个文件**。
@@ -63,18 +63,19 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 规则：
 
 - **落盘位置**由它决定：写配置时敏感项被剔出 `config.json`、写进 `credentials.json`
-  （`persistConfig()`，`:512`；`saveConfig()` 的拆包，`:605-623`）。
-- **读的时候两者拼回一份**（`applySecrets()`，`:521`），所以调用方不关心值在哪个文件。
+  （`persistConfig()`；`saveConfig()` 里那一段拆包）。
+- **读的时候两者拼回一份**（`applySecrets()`），所以调用方不关心值在哪个文件。
 - **一致迁移**：老版本把明文写在 `config.json` 里 —— 首次加载会自动搬到
-  `credentials.json` 并从 `config.json` 删掉（`:536-555`），不用手工做。
-- `DEFAULTS.asr` 里**没有** `apiKey` 这个键：它只在 `SECRET_PATHS` 里，属于「有才写」的字段。
-  用 `publicConfig()` 读时会脱敏成 `****xxxx`。
+  `credentials.json` 并从 `config.json` 删掉（`config.mjs` 的迁移段），不用手工做。
+- `DEFAULTS.asr` 里有个 `apiKey: ''` 占位（`DEFAULTS.docparse.mineru.token` 同理）：
+  它在 `DEFAULTS` 里是**空串**、真值只在 `SECRET_PATHS` 指的那条路径上，
+  属于「有才写」的字段 —— 用 `publicConfig()` 读时会脱敏成 `****xxxx`。
 
 ### 2.3 写回：只写「与默认值不同」的部分
 
-`persistConfig()`（`:512`）做两件事：
+`persistConfig()` 做两件事：
 
-1. `diffFromDefaults(cfg, DEFAULTS)`（`:493`）—— **只把偏离出厂默认的项写进文件**。
+1. `diffFromDefaults(cfg, DEFAULTS)` —— **只把偏离出厂默认的项写进文件**。
    为什么：默认值有些是运行时推导的（例如 `startupDir` 取自 `os.homedir()`）。
    全量写回会让「用户什么都没改，`config.json` 里却躺着一台机器的绝对路径」。
    只写差异之后，`config.json` ≈「**我改过什么**」清单。
@@ -86,11 +87,11 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 
 | 函数 | 行为 |
 |---|---|
-| `publicConfig()`（`:590`） | 给 HTTP 响应用的副本：`auth.token` → `***（已隐藏…）`，其余敏感项 `mask()` 成 `****` + 后 4 位 |
-| `saveConfig(patch)`（`:600`） | ① 以 `****` 开头的值跳过（那是脱敏串，不能覆盖真值）；② **空串 = 不改**（避免误清）；③ 写入后若 `auth.token` 为空则重新生成 —— **令牌不会因为任何写入变空** |
-| `rotateAuthToken()`（`:576`） | 换一个新令牌，旧令牌立即失效 |
-| `migrateScopedConfig()`（`:651`） | 一次性：把「错放在 `wiki.*` 里的全站配置」搬到顶层（`llm`/`embedding`/`search`/`docparse.mineru`/`network.proxy`/`outputLanguage`），搬完删旧键 |
-| `syncConfigMirrors()`（`:751`） | 把顶层那几节**同步一份只读镜像**回 `wiki.*`（带 `_mirror` 说明）。**改配置只改顶层**；`wiki.*` 里那几节会在下次启动被覆盖 |
+| `publicConfig()` | 给 HTTP 响应用的副本：`auth.token` → `***（已隐藏…）`，其余敏感项 `mask()` 成 `****` + 后 4 位 |
+| `saveConfig(patch)` | ① 以 `****` 开头的值跳过（那是脱敏串，不能覆盖真值）；② **空串 = 不改**（避免误清）；③ 写入后若 `auth.token` 为空则重新生成 —— **令牌不会因为任何写入变空** |
+| `rotateAuthToken()` | 换一个新令牌，旧令牌立即失效 |
+| `migrateScopedConfig()` | 一次性：把「错放在 `wiki.*` 里的全站配置」搬到顶层（`llm`/`embedding`/`search`/`docparse.mineru`/`network.proxy`/`outputLanguage`），搬完删旧键 |
+| `syncConfigMirrors()` | 把顶层那几节**同步一份只读镜像**回 `wiki.*`（带 `_mirror` 说明）。**改配置只改顶层**；`wiki.*` 里那几节会在下次启动被覆盖 |
 
 ---
 
@@ -111,7 +112,7 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 | 字段 | 默认 | 含义 |
 |---|---|---|
 | `auth.enabled` | `true` | 是否开启「Origin 白名单 + 本地令牌」两道闸 |
-| `auth.token` | `''` | 本地令牌，**留空会在首次运行时随机生成并写回**（`crypto.randomBytes(24).toString('hex')`，`:419-421`） |
+| `auth.token` | `''` | 本地令牌，**留空会在首次运行时随机生成并写回**（`newToken()`：`crypto.randomBytes(24).toString('hex')`） |
 | `auth.allowedOrigins` | `['http://127.0.0.1:5278','http://localhost:5278','http://127.0.0.1:5273','http://localhost:5273']` | 允许的浏览器来源（5278 = 生产，5273 = Vite 开发） |
 
 判定逻辑（`server/lib/auth.mjs`）：无 `Origin` 头的请求（curl / 本机脚本 / MCP 客户端）
@@ -126,7 +127,7 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 | `ai.model` | `''` | 默认对话模型名 | AI 相关功能会报错（没模型可调） |
 | `ai.models` | `[]` | 可选模型清单（问答页 / 随记页的下拉用） | 只显示 `ai.model` 一个 |
 | `ai.temperature` | `0.6` | 采样温度 | — |
-| `ai.persona` | `'服务对象是一名在校大学生'` | 系统提示词里「服务对象」那半句（**中性默认，谁用谁改**） | 代码里还有一份同样的兜底（`ai.mjs:107`） |
+| `ai.persona` | `'服务对象是一名在校大学生'` | 系统提示词里「服务对象」那半句（**中性默认，谁用谁改**） | 代码里还有一份同样的兜底（`ai.mjs:135`） |
 | `ai.personaPrivate` | `''`（**敏感**） | 可选的补充身份（学校 / 专业…），落 `credentials.json` | 不拼进提示词 |
 
 ### 3.4 工作站自身 `workstation` 与 `startupDir`
@@ -152,8 +153,12 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 | `asr.baseUrl` | `''` | 例如 `http://127.0.0.1:8080/v1`（本机 whisper 网关）或云端 | 空 → `visible()` 为 false，**模块隐藏** |
 | `asr.model` | `'whisper-1'` | 模型名 | — |
 | `asr.language` | `''` | 提示语言（ISO-639-1，如 `zh`/`en`） | 空 = 让服务端自己判断 |
-| `asr.timeoutSec` | `600` | 单次转写请求超时（秒）。下限被夹到 30（`asr.mjs:30`） | — |
-| `asr.apiKey` | （不在 `DEFAULTS` 里，**敏感**） | 转写后端的 key；本机服务不需要就留空 | 有 key 才写这一项 |
+| `asr.timeoutSec` | `600` | 单次转写请求超时（秒）。下限被夹到 30（`asr.mjs`） | — |
+| `asr.apiKey` | `''`（**敏感**） | 转写后端的 key；本机服务不需要就留空 | — |
+
+`asr.apiKey` 这一项：字段本身在 `DEFAULTS` 里（值恒为空串），真值按 `SECRET_PATHS` 的
+`['asr','apiKey']` **落到 `credentials.json`** —— 页面上填它会走 `PATCH /api/config`，
+服务端写盘时自动拆到凭据文件（见 §2.2）。**别把它写进 `config.json`、更别写进文档。**
 
 ### 3.6 本机视图扩展 `procscan`
 
@@ -248,11 +253,9 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 ⚠️ **隐私提示**：MinerU 开着时**文档会上传到 mineru.net**。这是第三方云端解析，
 页面上有标注；介意就把 `docparse.mineru.enabled` 关掉，只走本机通道。
 
-⚠️ **已知缺陷**：`docparse.tools.*` 这四个字段**在设置页里能填、但保存会被服务端拒绝** ——
-`CONFIG_EDITABLE.docparse` 只放行 `mineru`（`server/index.mjs:633`），
-而页面会 PATCH `docparse.tools`（`src/views/SettingsView.vue:187`），
-结果是弹一句「已保存，但这些字段被拒绝：docparse.tools」。
-要现在就用这四个字段，直接编辑 `server/config.json`。
+> **已放行（2026-09-30）**：`docparse.tools` 的四个字段（`pandoc` / `soffice` / `python` / `pdftotext`）
+> 现在都在 `CONFIG_EDITABLE.docparse` 里，**页面上能填能存**，不用再手工编辑 `config.json`。
+> 上一版这里写的「能填但保存会被拒」已经修掉 —— 见 §4 的白名单表。
 
 #### `network` 与 `outputLanguage`
 
@@ -282,13 +285,56 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 `embedding`，以及旧的 `wiki.mineru`。它们由顶层的同名配置在启动时同步过来（带 `_mirror` 标记），
 **不要手改** —— 改了下次启动会被覆盖。改配置改顶层（§3.8）。
 
+### 3.10 资讯：`collector` / `news`
+
+| 字段 | 默认 | 含义 | 留空会怎样 |
+|---|---|---|---|
+| `collector.dir` | `''` | **采集器的产物目录**（绝对路径；相对路径按仓库根解析）。边车只**读**它下面的 `out/latest.json`、`out/*.md`、`timeline/*.md`、`cases/*.md`、`reports/`、`sources.json`、`state.json`、`watch.json` | 空 → 资讯模块**从侧边栏隐藏** |
+| `collector.proxy` | `''` | 抓外网内容（只有「事件卡评论」那条路会出网）用的代理；留空 = 直连 | — |
+| `news.focusKeywords` | `[]` | 「与我相关」的关键词：条目命中任一即归 `focus` 分类 | 空 = 只认采集器标的分类 |
+
+- **采集器不在这里，也不在这个仓库里**：它是独立进程（本机计划任务 / 定时器 / 手动跑都行），
+  产物格式见 [news-contract.md](news-contract.md)，最小示例 `scripts/collector-skeleton.mjs`。
+  边车与这个目录之间只有一条「读」的关系 —— 产物变了页面就变，不需要重启。
+- 页面上的 👍/👎 与追踪**不写回采集器目录**（落在 `<dataDir>/news-prefs/`）；
+  要喂给采集器的那一份（`follow.json`）由 `POST /api/news/follow-push` 单独导出。
+
+### 3.11 做题本的题库池 `zuotiben`
+
+| 字段 | 默认 | 含义 | 留空会怎样 |
+|---|---|---|---|
+| `zuotiben.pool.dir` | `''` | 题库目录（放那两份 markdown 的地方） | 三样之一为空 → 池子不可用（`list_problem_pool` 回「没配题库目录」），**做题本本体照常可用** |
+| `zuotiben.pool.problems` | `''` | 试题册文件名（**相对 `dir`**）：只有题干与选项 | 同上 |
+| `zuotiben.pool.solutions` | `''` | 解析册文件名（相对 `dir`）：只有答案与解析 | 同上 |
+
+题干与解析都是**别人的版权物，不随仓库分发**：自己按 [zuotiben-import.md](zuotiben-import.md)
+把两份材料摆成规定结构（章标题 / 题块 / 五种解析标记）再把路径填进来。
+改完**不用重启边车** —— 配置与两份文件的 mtime 一起用来失效缓存。
+
+### 3.12 语音合成 `tts`
+
+「每日一句」的朗读走它：本机 **edge-tts**（Python 包）起一个子进程合成，
+结果按 `sha1(voice|rate|text)` 落 `<dataDir>/tts/cache/` 复用 —— 同一句话只在上游合成一次。
+
+| 字段 | 默认 | 含义 | 留空会怎样 |
+|---|---|---|---|
+| `tts.dir` | `''` | edge-tts 工具目录（里面要有 `.venv/Scripts/python.exe` 与 `say.py`） | 空或没装好 → `/api/tts/status` 回 `ready:false`，前端**自动回落浏览器自带朗读**（不报错、界面不空） |
+| `tts.voice` | `'en-US-AriaNeural'` | 英文场景默认音色 | 用内置默认 |
+| `tts.voiceZh` | `'zh-CN-XiaoxiaoNeural'` | 中文场景默认音色 | 同上 |
+| `tts.rate` | `'+0%'` | 语速（edge-tts 的格式，如 `+10%` / `-10%`） | 同上 |
+
+接口是 `GET /api/tts/status`（音色清单 / 工具是否就绪 / 缓存统计）与
+`GET /api/tts/speak?text=…`（把音频流回给 `<audio>`；令牌走 `?token=`）。
+**一次朗读上限 800 字**：它只服务「读一句话」，别当开放 TTS 代理用。
+这一节**不在 §4 的 PATCH 白名单里** —— 要改就编辑 `server/config.json`。
+
 ---
 
 ## 4. 页面上能改什么（白名单）
 
 改配置推荐走页面「设置与数据」：那里的写入是**白名单式**的 —— 一个手滑（或前端传了个多余字段）
 不会把边车自己的配置写坏（写坏之后连「打开设置页改回来」都做不到）。
-服务端放行清单分**两张**（都在 `server/index.mjs`），按「这一项在 `config.json` 里的形状」分：
+服务端放行清单分**两张**（都在 `server/lib/config-editable.mjs`），按「这一项在 `config.json` 里的形状」分：
 
 **① `CONFIG_EDITABLE` —— 分节（值是对象）**，逐子字段放行：
 
@@ -301,10 +347,14 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 | `llm` | `activePresetId` `configs` `keys` `customPresets` `taskRouting` `reasoning` `maxContextSize` |
 | `embedding` | `enabled` `endpoint` `model` `apiKey` `batchSize` `concurrency` `chunkChars` `chunkOverlap` `maxPages` `outputDimensionality` `extraHeaders` |
 | `search` | `provider` `apiKey` `serpApiEngine` `searXngUrl` `searXngCategories` `ollamaUrl` `providerConfigs` `defaultSource` `maxResults` `anyTxt` |
-| `docparse` | `mineru`（**没有 `tools`**，见 §3.8 的已知缺陷） |
+| `docparse` | `mineru` `tools`（`tools` 是 2026-09-30 补上的：四个工具路径现在页面上能填能存） |
 | `network` | `proxy` |
+| `asr` | `provider` `baseUrl` `model` `language` `timeoutSec` `apiKey`（`apiKey` 的真值按 `SECRET_PATHS` 落 `credentials.json`，页面只是把值送进来） |
+| `collector` | `dir` `proxy` |
+| `news` | `focusKeywords` |
+| `zuotiben` | `pool` |
 | `wiki` | `dir` `model` `maxChars` `chatMaxTokens` `embedding` `mineru` `llm` `search` `output` `network` `scheduledImport` `watchEnabled` `watchAutoIngest` `watchIntervalMin` `watchMaxFileSizeMb` `watchDirs` `watchExcludeDirs` |
-| **不在表里的** | `port`、`auth.*`、`dataDir`、`asr.*`、`procscan.*` —— **只能手工编辑 `config.json`** |
+| **不在表里的** | `port`、`auth.*`、`dataDir`、`procscan.*`、`tts.*` —— **只能手工编辑 `config.json`** |
 
 **② `CONFIG_EDITABLE_SCALARS` —— 标量（值是字符串 / 数字 / 布尔）**，整项放行：
 
@@ -319,31 +369,39 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 > 而页面把 200 当成功。加新配置项时**两张表 + `DEFAULTS` 都要动**，
 > `scripts/tests/config-whitelist.test.mjs` 会替你查漏（见 §10）。
 
-被拒的字段不会让整个请求失败：响应里带 `rejected: ['docparse.tools']`，
+被拒的字段不会让整个请求失败：响应里带 `rejected: ['…']`，
 页面会提示「已保存，但这些字段被拒绝：…」。`GET /api/config` 同时返回
 `config`（脱敏副本）、`defaults`（设置页「恢复默认值」用）、`editable`（分节那张表）、
 `editableScalars`（标量那张表，数组）、`path`。
 
-> ⚠️ `asr.*` 也不在 PATCH 白名单里，但设置页确实有转写后端那一栏并会 PATCH `asr`
-> （`src/views/SettingsView.vue:185`）—— 与 `docparse.tools` 同一类问题。
-> 结果是**转写端点也只能手工编辑 `config.json`**。
+> 上一版这里点过两处「页面能填、保存被拒」的缺陷（`docparse.tools` 与 `asr.*`）——
+> **2026-09-30 都已修掉**：两张表里现在都有它们，页面上改完就是真的存下去了。
+> 现在只剩 `tts.*`（语音合成）一节不在表里。
 
 ---
 
 ## 5. 环境变量
 
-边车本身只认下面这些（`grep` 全仓确认过的清单）：
+边车 + 随仓库带的脚本只认下面这些（`grep` 全仓确认过的清单）：
 
 | 变量 | 谁读 | 作用 | 默认 |
 |---|---|---|---|
-| `WS_PORT` | `server/index.mjs:49`；`scripts/restart-sidecar.py:69`；`scripts/sidecar-keepalive.py:28` | 覆盖监听端口 | `config.json` 的 `port` → `5278` |
-| `WS_DATA_DIR` | `server/config.mjs:397`（`dataDir()`）；`plan.mjs:20`、`summaries.mjs:30`、`usage-cache.mjs:20`、`vocab.mjs:39` 各抄了一份 | 覆盖数据目录（**测试用**：把数据写到别处，不碰真实数据） | `config.json` 的 `dataDir` |
+| `WS_PORT` | `server/index.mjs:56`；`scripts/restart-sidecar.py:69`；`scripts/sidecar-keepalive.py:28` | 覆盖监听端口 | `config.json` 的 `port` → `5278` |
+| `WS_DATA_DIR` | `server/config.mjs` 的 `dataDir()`（第 436 行）；`plan.mjs`、`summaries.mjs`、`usage-cache.mjs`、`vocab.mjs` 各抄了一份 | 覆盖数据目录（**测试用**：把数据写到别处，不碰真实数据） | `config.json` 的 `dataDir` |
 | `WS_NODE` | `scripts/restart-sidecar.py:41`；`scripts/sidecar-keepalive.py:12` | 指定用哪个 `node.exe` | 先 PATH（`shutil.which('node')`），再常见安装位 |
 | `USAGE_LIVE_SEC` | `server/lib/usage-cache.mjs:24` | 用量缓存「轻同步」周期（秒），下限夹到 15 | `60` |
 | `USAGE_FULL_SEC` | `server/lib/usage-cache.mjs:25` | 「全量同步」周期（秒），下限 = `LIVE_SEC` | `300` |
 | `VITE_SIDECAR_URL` | `src/core/sidecar.ts:17`（构建期注入，类型在 `src/types/env.d.ts:11`） | 前端调边车的地址。**留空 = 同源相对路径**（生产态本来就同源） | `''` |
 
-**被边车主动清掉的**（`server/index.mjs:55-58`，故意为之）：
+**只有前端门禁读的**（`scripts/check-*.cjs` / `check-ai-ui.mjs`，不是边车配置）：
+
+| 变量 | 作用 | 默认 |
+|---|---|---|
+| `WS_BASE` | 门禁要打开哪个页面（边车地址） | `http://127.0.0.1:5278` |
+| `WS_CHROME` | 指定 Chrome / Edge 的路径（装在不常见的位置时用） | 按默认安装位找 |
+| `WS_CDP_PORT` / `PROBE_PORT` | 调试端口（同机并行跑多条门禁时错开） | 各脚本内置（9333–9338） |
+
+**被边车主动清掉的**（`server/index.mjs:59-65`，故意为之）：
 
 ```
 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / http_proxy / https_proxy / all_proxy  → 删除
@@ -356,7 +414,7 @@ NO_PROXY = '*'                                                                �
 所以「给边车挂代理」这件事不在环境变量里做，而是走 `config.json` 的 `network.proxy`
 （这是应用级、按模块生效的代理，而 `HTTP_PROXY` 是给整个进程的）。
 
-**顺带被读的系统变量**（不是配置项，不用管）：`SystemRoot`（找 `wscript.exe`，`panel.mjs:199`）、
+**顺带被读的系统变量**（不是配置项，不用管）：`SystemRoot`（找 `wscript.exe`，`panel.mjs:197`）、
 `ProgramFiles` / `LOCALAPPDATA` / `APPDATA`（两个 python 脚本找 node、拼启动文件夹路径）。
 
 开发态另有一份 `.env.local`（可选，见 README 的快速开始）：
@@ -383,7 +441,7 @@ VITE_SIDECAR_URL=http://127.0.0.1:5278
 
 ```bash
 curl -s http://127.0.0.1:6000/api/health
-# 期望：{"ok":true,"service":"workstation","version":"0.1.0","port":6000,...}
+# 期望：{"ok":true,"service":"workstation","version":"0.2.0","port":6000,...}
 ```
 
 `/api/health` 免令牌，所以这条 curl 不需要带 `X-WS-Token`。
@@ -404,7 +462,7 @@ curl -s http://127.0.0.1:6000/api/health
 
 效果：`auth.needsToken()` 对任何路径都返回 false（`auth.mjs:44-45`），
 `/api/*` 与 `/mcp` 不再要令牌。**Origin 白名单那一关也一起失效**吗？不 ——
-白名单判定在边车入口（`index.mjs:1206`）独立执行，与 `enabled` 无关，
+白名单判定在边车入口（`index.mjs:1343`）独立执行，与 `enabled` 无关，
 非白名单来源仍然 403。要连它一起放开，就把来源加进 `allowedOrigins`。
 
 关掉意味着：**本机任何网页都能读写你的看板、词单、知识库、进程操作**。
@@ -422,7 +480,7 @@ curl -s http://127.0.0.1:6000/api/health
 
 没有页面入口（设置页不暴露 `auth.*`）。做法：编辑 `server/config.json`，
 把 `auth.token` 删掉或设为 `""`，重启边车 —— `loadConfig()` 会在启动时生成新令牌并写回
-（`:560-573`）。页面会通过 `/api/auth/token` 自动取到新令牌，不用手工同步。
+（`loadConfig()` 里那一段：`config.mjs` 的 `:599-607`）。页面会通过 `/api/auth/token` 自动取到新令牌，不用手工同步。
 
 ### 7.4 脚本 / MCP 客户端怎么带令牌
 
@@ -505,8 +563,8 @@ grep -rniE "sk-[a-z0-9]{16,}|C:\\\\Users|D:\\\\|/Users/" --include='*.json' --in
   —— `loadConfig()` 有内存缓存，写文件不会让运行中的边车改主意。
   用页面或 `PATCH /api/config` 改的会立刻生效（`saveConfig()` 会重算缓存）。
 - 例外（**不用重启**）：`wiki-queue` 的监听设置改完页面会立刻重排定时器
-  （`server/index.mjs:909-915`）；pguard 的规则阈值与名单每次 `tick()` 重新读，
-  带 5 秒 mtime 缓存（`server/lib/pguard.mjs:183-203,631`）。
+  （`server/index.mjs:894-895`）；pguard 的规则阈值与名单每次 `tick()` 重新读，
+  带 5 秒 mtime 缓存（`server/lib/pguard.mjs` 的 `engineConfig()`：`:183-203`；`tick()` 每拍都会调它）。
 
 ### 9.2 `dataDir` / `WS_DATA_DIR` 现在推不动全部模块
 
@@ -535,7 +593,7 @@ grep -rniE "sk-[a-z0-9]{16,}|C:\\\\Users|D:\\\\|/Users/" --include='*.json' --in
 
 ### 9.6 `auth.token` 不会变空
 
-即使写入的配置里把令牌设成空，`saveConfig()` 也会在最后补一个新令牌（`:633-636`）。
+即使写入的配置里把令牌设成空，`saveConfig()` 也会在最后补一个新令牌（`config.mjs` 的 `:674-676`）。
 想换令牌就照 §7.3 做；想彻底不要令牌就关 `auth.enabled`。
 
 ---

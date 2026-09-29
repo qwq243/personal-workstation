@@ -105,7 +105,7 @@ onMounted(load)
         <div class="block__title">说明</div>
         <p class="note">
           这里只统计「看板自己记的东西」——计划、记录、复盘、心情。
-          AI 总结默认显示最近一次的那份，也在「今日」页。
+          AI 总结与「本周一览」在「今日」页（AI 总结默认显示最近一次的那份）。
         </p>
         <p class="note">
           看板数据存在边车的 <code class="ws-mono">server/data/dashboard.json</code>，

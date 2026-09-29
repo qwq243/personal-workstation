@@ -1,8 +1,7 @@
 /**
  * 边车（sidecar）API 客户端。
  *
- * 前端所有「外部数据」都从这里走：看板与规划台、词单与每日一句、模型用量、
- * 知识库、语音随记、进程与端口、以及工作站自己的自启位。
+ * 页面里所有「外部数据」都从这里走：余额、看板、日历、知识库、资讯、AI。
  * 边车不在时（没启动 / 端口被占），所有调用返回 { ok:false }，页面显示引导而不是崩掉。
  *
  * 加一条新调用的规矩：**只在这个文件的 `api` 对象里加**，别在页面里裸 `fetch` ——
@@ -16,7 +15,7 @@ import { readSseStream } from './sse'
  *
  * 生产态边车**同源**提供页面（dist 就是它发出去的），所以默认走**相对路径** ——
  * 不必写死 127.0.0.1:5278，换端口 / 换机器都不用改代码。
- * 开发态（Vite 5273）在 `.env.local` 里写 `VITE_SIDECAR_URL=http://127.0.0.1:5278`，
+ * 开发态（Vite 自己的端口）在 `.env.local` 里写 `VITE_SIDECAR_URL=http://127.0.0.1:5278`，
  * 或临时在 URL 上带 `?sidecar=host:port`。
  */
 export const SIDECAR_URL = (import.meta.env?.VITE_SIDECAR_URL as string | undefined) ?? ''
@@ -155,16 +154,16 @@ export const api = {
   newapiSpendToday: () => call('/api/newapi/spend/today', { timeout: 60000 }),
   newapiLogs: (pageSize = 30) => call(`/api/newapi/logs?pageSize=${pageSize}`, { timeout: 40000 }),
 
-  /* 工作站自身（面板）。页面在「运行与自启」`#/service` */
-  /** 当前边车进程：端口 / PID / node / 项目根 / 配置文件路径 */
-  panelSidecar: () => call('/api/panel/sidecar', { timeout: 15000 }),
+  /* 工作站自身（面板） */
   /** 面板状态 + 自启位体检（编码 / 路径 / 用的哪个 node） */
   panelStatus: () => call('/api/panel/status', { timeout: 15000 }),
   /** 面板自启位操作：enable（生成/修复）· disable · remove · open-startup */
   panelAutostart: (action: 'enable' | 'disable' | 'remove' | 'open-startup') =>
     call('/api/panel/autostart', { method: 'POST', body: { action }, timeout: 20000 }),
+  /** 当前边车进程：端口 / PID / node / 项目根 / 配置文件路径 */
+  panelSidecar: () => call('/api/panel/sidecar', { timeout: 15000 }),
 
-  /* pguard —— 工作台的进程守护引擎 */
+  /* pguard —— 工作台自己的进程守护引擎（自研；判定与动作都在边车里，规则带审计） */
   /** 引擎状态：跑没跑、演练还是真打、实时 CPU/内存、阈值、今天的审计、最近一拍的判定说明 */
   pguardStatus: () => call('/api/pguard/status', { timeout: 30000 }),
   /** 引擎启停（停只是不判定，不去动已经在跑的进程） */
@@ -174,7 +173,7 @@ export const api = {
     call('/api/pguard/pause', { method: 'POST', body: { on, reason }, timeout: 20000 }),
   /** 立即跑一轮判定 */
   pguardTick: () => call('/api/pguard/tick', { method: 'POST', timeout: 60000 }),
-  /** 演练开关：关掉之后规则会真的动手，页面上会弹确认 */
+  /** 演练开关（第三方那个还在跑时会被拒） */
   pguardSetDryRun: (on: boolean) =>
     call('/api/pguard/dry-run', { method: 'POST', body: { on }, timeout: 30000 }),
   /** 改规则阈值（服务端白名单放行） */
@@ -199,10 +198,13 @@ export const api = {
   pguardTrim: (pid: number) => call('/api/pguard/trim', { method: 'POST', body: { pid }, timeout: 60000 }),
   /** 清系统待机列表（提权，会弹一次 UAC，所以超时给得宽） */
   pguardPurgeStandby: () => call('/api/pguard/purge-standby', { method: 'POST', timeout: 180000 }),
+  /** 从第三方工具的配置里再迁一次 */
+  pguardImportLegacy: (force = false) =>
+    call('/api/pguard/import-legacy', { method: 'POST', body: { force }, timeout: 30000 }),
   /** 引擎自己的运行日志尾部 */
   pguardLog: (lines = 40) => call(`/api/pguard/log?lines=${lines}`, { timeout: 20000 }),
 
-  /* 进程守护补页：端口 / 智能体 */
+  /* 进程守护补页：端口 / 智能体（照第三方 ProcessGuard 的那两页搬过来） */
   /** 端口与连接。listenOnly 默认只看 LISTENING */
   procPorts: (opts: { listenOnly?: boolean; q?: string } = {}) => {
     const q = new URLSearchParams()
@@ -222,6 +224,9 @@ export const api = {
   /** 工作台自己记的结束动作审计 */
   procActions: (limit = 50) => call(`/api/procscan/actions?limit=${limit}`, { timeout: 20000 }),
 
+  /* 第三方 ProcessGuard 的遗留件：迁移它的配置、把它停掉、翻它的历史（见 lib/processguard.mjs） */
+  /** 它的状态：装没装、跑没跑、今天动过什么手。只读 */
+
   /* 看板 */
   day: (date?: string) => call(`/api/dashboard/day${date ? `?date=${date}` : ''}`),
   patchDay: (date: string, patch: Record<string, unknown>) => call(`/api/dashboard/day?date=${date}`, { method: 'PATCH', body: patch }),
@@ -240,23 +245,39 @@ export const api = {
   addNote: (text: string, date?: string) => call(`/api/dashboard/note${date ? `?date=${date}` : ''}`, { method: 'POST', body: { text } }),
   removeNote: (id: string, date?: string) => call(`/api/dashboard/note/remove${date ? `?date=${date}` : ''}`, { method: 'POST', body: { id } }),
 
-  /* 每日一句（句子库自备；指针做完才走，规则在 server/lib/english-daily.mjs） */
+  /* 英语每日一句（句库自备，见 docs/每日一句导入.md；指针做完才走，规则在 server/lib/english-daily.mjs） */
+  /* 朗读（edge-tts 合成整句，见 server/lib/tts.mjs）：地址直接喂 <audio> src */
+  ttsStatus: () => call('/api/tts/status', { timeout: 20000 }),
+  ttsSpeakUrl: async (text: string, opts: { voice?: string; rate?: string } = {}) => {
+    const t = await ensureToken()
+    const q = new URLSearchParams({ text })
+    if (opts.voice) q.set('voice', opts.voice)
+    if (opts.rate) q.set('rate', opts.rate)
+    return `${base}/api/tts/speak?${q.toString()}${t ? `&token=${encodeURIComponent(t)}` : ''}`
+  },
   englishDaily: () => call('/api/english/daily'),
   englishDailyComplete: (day: number, rating: 'good' | 'half' | 'lost') =>
     call('/api/english/daily/complete', { method: 'POST', body: { day, rating } }),
-  /** 句子库：每天一句的摘要 + 自评状态 */
+  /** 句子库：各天的摘要 + 自评状态 */
   englishDailyLibrary: () => call('/api/english/daily/library'),
   /** 单日详情（重练抽屉） */
   englishDailyDay: (day: number) => call(`/api/english/daily/day?day=${day}`),
+  /** 一段 Day 区间的全文（每日一句做题本 / 打印页）：一句一条，含答案与自评状态 */
+  englishDailySheet: (from: number, to: number) =>
+    call(`/api/english/daily/sheet?from=${from}&to=${to}`, { timeout: 20000 }),
   /** 打卡日志：最近 N 天做没做 */
   englishDailyLog: (days = 35) => call(`/api/english/daily/log?days=${days}`),
 
+  /* 每日要点（给看板取今天该看的几条；不渲染整页） */
+  dailyHighlights: (date?: string) => call(`/api/daily/highlights${date ? `?date=${date}` : ''}`),
+
   /* AI */
   aiSummary: (date?: string) => call('/api/ai/summary', { method: 'POST', body: { date }, timeout: 180000 }),
-  /** 今天的行动建议：由昨天的总结 + 今天的计划 / 记录 / 校历现算（单独存档） */
+  /** 今天的行动建议：由昨天的总结 + 今天的计划、词单与做题进度现算（单独存档） */
   aiToday: (date?: string) => call('/api/ai/today', { method: 'POST', body: { date }, timeout: 180000 }),
-  /** 总结卡整包：回顾（三级降级）+ 今天的建议存档 */
+  /** 总结卡整包：回顾（三级降级）+ 今天的建议存档 + 主线倒计时（考研/四级） */
   aiDaily: (date?: string) => call(`/api/ai/daily${date ? `?date=${date}` : ''}`),
+  aiTips: (date?: string) => call('/api/ai/tips', { method: 'POST', body: { date }, timeout: 120000 }),
   aiReview: (date?: string) => call('/api/ai/review', { method: 'POST', body: { date }, timeout: 180000 }),
   aiAsk: (question: string, history: { role: string; content: string }[] = []) =>
     call('/api/ai/ask', { method: 'POST', body: { question, history }, timeout: 180000 }),
@@ -282,7 +303,7 @@ export const api = {
   vocabAdvice: () => call('/api/vocab/advice'),
   vocabSessions: (limit = 10) => call(`/api/vocab/sessions?limit=${limit}`),
 
-  /* 规划台（长期目标：项目 + 备考清单 + 倒计时；存在 server/data/plan.json，
+  /* 规划台（长期目标：项目 + 考研/四级备考 + 倒计时；存在 server/data/plan.json，
      与智能体读写同一份 —— 每日复盘可以把项目进度直接写进去） */
   /** 面板全量：关键日期（含 daysLeft）+ 项目 + 备考（含完成度）+ meta.rev */
   planPanel: () => call('/api/plan/panel', { timeout: 20000 }),
@@ -301,6 +322,7 @@ export const api = {
   planUpsertExam: (payload: Record<string, unknown>) =>
     call('/api/plan/exam', { method: 'POST', body: payload, timeout: 20000 }),
 
+  /** 个人画像：三年主线 / 瓶颈 / 停止项 / 最近一次收尾 */
 
   /* 配置 */
   config: () => call('/api/config', { timeout: 15000 }),
@@ -308,7 +330,7 @@ export const api = {
   patchConfig: (patch: Record<string, unknown>) =>
     call('/api/config', { method: 'PATCH', body: { patch }, timeout: 20000 }),
 
-  /* 知识库（库是本地一个普通目录，路径在设置页里配） */
+  /* 知识库（多库；库目录在设置里配，见 docs/CONFIG.md 的 wiki.dir） */
   /** 总览：页面数与类型分布、原始资料份数、还没编译的料、最近一次操作日期 */
   wikiStatus: () => call('/api/wiki/status', { timeout: 15000 }),
   /** 文件清单（含 raw 源文件）：root = wiki / sources / all */
@@ -356,7 +378,7 @@ export const api = {
   wikiAsk: (question: string, opts: { topK?: number; history?: { role: string; content: string }[] } = {}) =>
     call('/api/wiki/ask', { method: 'POST', body: { question, ...opts }, timeout: 240000 }),
 
-  /* 多库：切库只换当前目录，从不删文件 */
+  /* 多库（桌面端的 projects）：切库只换当前目录，从不删文件 */
   wikiProjects: () => call('/api/wiki/projects', { timeout: 20000 }),
   wikiSetProject: (dir: string) => call('/api/wiki/projects/set', { method: 'POST', body: { dir }, timeout: 30000 }),
   wikiAddProject: (dir: string, name?: string) =>
@@ -373,7 +395,7 @@ export const api = {
   wikiRenameSession: (id: string, title: string) =>
     call('/api/wiki/chat/rename', { method: 'POST', body: { id, title }, timeout: 20000 }),
   wikiDeleteSession: (id: string) => call('/api/wiki/chat/delete', { method: 'POST', body: { id }, timeout: 20000 }),
-  /** 库内技能（.workstation-kb/skills/*.md），问答时可勾选注入 */
+  /** 库内技能（.llm-wiki/skills/*.md），问答时可勾选注入 */
   wikiSkills: () => call('/api/wiki/chat/skills', { timeout: 20000 }),
 
   /* 入库队列 + 源目录监听 */
@@ -426,7 +448,7 @@ export const api = {
     call('/api/wiki/review/action', { method: 'POST', body: payload, timeout: 120000 }),
   wikiReviewIgnored: () => call('/api/wiki/review/ignored', { timeout: 20000 }),
 
-  /* 模型配置（预设 / 任务路由 / 连通测试） */
+  /* 模型配置（预设 / 任务路由 / 连通测试；对照桌面端的 llm-presets + preset-resolver） */
   wikiLlm: () => call('/api/wiki/llm', { timeout: 20000 }),
   wikiLlmPresets: () => call('/api/wiki/llm/presets', { timeout: 20000 }),
   /** patch：{ activePresetId?, taskRouting?, reasoning?, maxContextSize?, config?: {id, baseUrl, model, apiKey, apiMode, maxContextSize} } */
@@ -453,10 +475,34 @@ export const api = {
   wikiMineruSave: (patch: Record<string, unknown>) => call('/api/wiki/mineru', { method: 'POST', body: patch, timeout: 20000 }),
   wikiMineruTest: () => call('/api/wiki/mineru/test', { timeout: 60000 }),
 
-  /* 语音随记（上传音频 → 转写后端 → 大模型总结） */
-  /** 整体状态：转写后端配没配、最近的任务、记录条数 */
+  /* 资讯（`#/news`）：读采集器的产物目录（`collector.dir`，格式见 docs/news-contract.md）。
+     采集本身不在这里做 —— 采集器是独立进程，本机计划任务或云机器 cron 跑它。 */
+  /** 最新一批：合并后的信息流 + 模型简报 + 统计 + 各源状态 */
+  newsFeed: () => call('/api/news/feed', { timeout: 30000 }),
+  /** 资讯看板（页面主要就发这一个请求）：分类 / 情感 / 关键词热度 / 来源统计 / 定时任务 */
+  newsDashboard: (force = false) => call(`/api/news/dashboard${force ? '?force=1' : ''}`, { timeout: 150000 }),
+  /** 最近几批（给「批次轮播」） */
+  newsBatches: (limit = 8) => call(`/api/news/batches?limit=${limit}`, { timeout: 20000 }),
+  /** 时间线：不传 id = 索引（各关注主题的条数与最近几条） */
+  newsTimeline: (id = '') => call(`/api/news/timeline${id ? `?id=${encodeURIComponent(id)}` : ''}`, { timeout: 20000 }),
+  /** 案卷（溯源记录，md 原文） */
+  newsCase: (id = '') => call(`/api/news/case${id ? `?id=${encodeURIComponent(id)}` : ''}`, { timeout: 20000 }),
+  /** 深度报告清单（大事件自动溯源出的舆情分析） */
+  newsReports: (limit = 20) => call(`/api/news/reports?limit=${limit}`, { timeout: 20000 }),
+  /** 一份报告的 markdown 原文 */
+  newsReport: (file: string) => call(`/api/news/report?file=${encodeURIComponent(file)}`, { timeout: 20000 }),
+  /** 事件反馈：👍/👎/备注（调教采集的闭环，落到 data/news-prefs/） */
+  newsFeedback: (body: any) => call('/api/news/feedback', { method: 'POST', body, timeout: 20000 }),
+  /** 一键采用某条备注（黑名单 / 加权 / 降频 / 停用源） */
+  newsApply: (body: any) => call('/api/news/apply', { method: 'POST', body, timeout: 20000 }),
+  /** 手动跑一批 AI 概括（会等它跑完）：把当前这批原始条目变成 AI 事件卡 */
+  newsDigest: () => call('/api/news/digest', { method: 'POST', timeout: 300000 }),
+  /** 追踪某张卡：下一轮 AI 在原卡上补齐（不重新生成） */
+  newsTrack: (body: any) => call('/api/news/track', { method: 'POST', body, timeout: 20000 }),
+  /* 语音随记：转写后端是标准 provider 接口（server/lib/asr.mjs），录音 → 起任务 → 轮询 → 落成记录 */
+  /** 边车侧状态：转写后端可用性、数据目录、任务与记录统计 */
   memoStatus: () => call('/api/memo/status', { timeout: 15000 }),
-  /** 转写后端状态 + 支持的音频格式（页面据此显示引导或操作区） */
+  /** 转写后端探活（provider / 端点 / 模型是否配齐） */
   memoAsr: () => call('/api/memo/asr', { timeout: 15000 }),
   /** 上传音频（二进制走 octet-stream，不塞 JSON），返回落盘的绝对路径 */
   memoUpload: (name: string, file: Blob) =>
@@ -476,20 +522,7 @@ export const api = {
   /** 总结用哪个模型（清单与知识库问答同源） */
   memoModels: () => call('/api/memo/models', { timeout: 20000 }),
   memoSetModel: (model: string) => call('/api/memo/model', { method: 'POST', body: { model }, timeout: 20000 }),
-  /** 给 AI 的提示词模板（四段；`{{transcript}}` 占位符，空串 = 回默认） */
-  memoPrompts: () => call('/api/memo/prompts', { timeout: 20000 }),
-  memoSetPrompts: (prompts: Record<string, string>) =>
-    call('/api/memo/prompts', { method: 'POST', body: prompts, timeout: 20000 }),
-  memoRecords: (limit = 50) => call(`/api/memo/records?limit=${limit}`, { timeout: 20000 }),
-  memoRecord: (id: string) => call(`/api/memo/record?id=${encodeURIComponent(id)}`, { timeout: 20000 }),
-  /** 一条记录的 Markdown 全文 + 建议文件名（「复制」和「导出 MD」都用它） */
-  memoExport: (id: string) => call(`/api/memo/export?id=${encodeURIComponent(id)}`, { timeout: 20000 }),
-  memoRename: (id: string, title: string) =>
-    call('/api/memo/rename', { method: 'POST', body: { id, title }, timeout: 20000 }),
-  memoDelete: (id: string) => call('/api/memo/delete', { method: 'POST', body: { id }, timeout: 20000 }),
-  memoSummarize: (id: string, model = '') =>
-    call('/api/memo/summarize', { method: 'POST', body: { id, model }, timeout: 300000 }),
-  /** 整理前的那几个开关：记录类型（口述/访谈）、默认热词分类、是否自动学新词 */
+  /** 记录类型 / 默认热词分类 / 自动学词三个开关 + 热词库（一次拿全，页面首屏用） */
   memoOptions: () => call('/api/memo/options', { timeout: 20000 }),
   memoSetOptions: (patch: { type?: string; hotwordCategories?: string[]; autoHotwords?: boolean }) =>
     call('/api/memo/options', { method: 'POST', body: patch, timeout: 20000 }),
@@ -507,17 +540,86 @@ export const api = {
   /** 换记录的分类（空串 = 清掉；会重算热词命中） */
   memoCategory: (id: string, category: string) =>
     call('/api/memo/category', { method: 'POST', body: { id, category }, timeout: 30000 }),
-  /** 这次想理清的重点 / 访谈提纲（改完重新整理会按它对照） */
+  /** 这次想理清的重点 / 访谈提纲（改完重新总结会按它对照） */
   memoFocus: (id: string, focus: string) =>
     call('/api/memo/focus', { method: 'POST', body: { id, focus }, timeout: 20000 }),
-  /** 原始音频的回放地址（带令牌，直接喂给 <audio>；支持 Range 拖进度） */
+  /** 原始录音的播放地址（带令牌，直接喂给 <audio>；支持 Range 拖进度） */
   memoAudioUrl: async (id: string) => {
     const t = await ensureToken()
     return `${base}/api/memo/audio?id=${encodeURIComponent(id)}${t ? `&token=${encodeURIComponent(t)}` : ''}`
   },
-
-  // ↓ 新接口加在这里（与 server/index.mjs 里那条 route() 一一对应；
-  //   加完顺手看一眼 docs/EXTENDING.md §3.3 的三条约定：只在这里发请求、别裸 fetch、超时按任务时长给）
+  /** 音频占用总量 / 删掉某条记录的录音（记录留着） */
+  memoAudioUsage: () => call('/api/memo/audio/usage', { timeout: 20000 }),
+  memoAudioRemove: (id: string) =>
+    call('/api/memo/audio/remove', { method: 'POST', body: { id }, timeout: 20000 }),
+  /** 路径总览（数据目录 / 音频占用 / 转写工具在哪） */
+  memoDir: () => call('/api/memo/dir', { timeout: 20000 }),
+  /** 给 AI 的提示词模板（六段；`{{transcript}}` 占位符，空串 = 回默认） */
+  memoPrompts: () => call('/api/memo/prompts', { timeout: 20000 }),
+  memoSetPrompts: (prompts: Record<string, string>) =>
+    call('/api/memo/prompts', { method: 'POST', body: prompts, timeout: 20000 }),
+  memoRecords: (limit = 50) => call(`/api/memo/records?limit=${limit}`, { timeout: 20000 }),
+  memoRecord: (id: string) => call(`/api/memo/record?id=${encodeURIComponent(id)}`, { timeout: 20000 }),
+  /** 一条记录的 Markdown 全文 + 建议文件名（「复制」和「导出 MD」都用它） */
+  memoExport: (id: string) => call(`/api/memo/export?id=${encodeURIComponent(id)}`, { timeout: 20000 }),
+  memoRename: (id: string, title: string) =>
+    call('/api/memo/rename', { method: 'POST', body: { id, title }, timeout: 20000 }),
+  memoDelete: (id: string) => call('/api/memo/delete', { method: 'POST', body: { id }, timeout: 20000 }),
+  memoSummarize: (id: string, model = '') =>
+    call('/api/memo/summarize', { method: 'POST', body: { id, model }, timeout: 300000 }),
+  /* 做题本（每日一题：一题一份，打印一题一页） */
+  zuotibenDay: (date = '') =>
+    call(`/api/zuotiben/day${date ? `?date=${date}` : ''}`, { timeout: 20000 }),
+  zuotibenDays: () => call('/api/zuotiben/days', { timeout: 20000 }),
+  zuotibenRange: (from: string, to: string) =>
+    call(`/api/zuotiben/range?from=${from}&to=${to}`, { timeout: 20000 }),
+  zuotibenRangeLabel: (date: string) =>
+    call(`/api/zuotiben/range-label?date=${date}`, { timeout: 20000 }),
+  zuotibenAdd: (payload: {
+    date?: string
+    sourceLabel?: string
+    note?: string
+    problems: Array<Record<string, any>>
+  }) => call('/api/zuotiben/add', { method: 'POST', body: payload, timeout: 30000 }),
+  /** 改一条题：做题状态 / 对错 / 答案 / 解析 / 考点 */
+  zuotibenUpdate: (date: string, id: string, patch: Record<string, any>) =>
+    call('/api/zuotiben/problem', { method: 'POST', body: { date, id, patch }, timeout: 20000 }),
+  zuotibenRemove: (date: string, id: string) =>
+    call('/api/zuotiben/remove', { method: 'POST', body: { date, id }, timeout: 20000 }),
+  zuotibenClear: (date: string) =>
+    call('/api/zuotiben/clear', { method: 'POST', body: { date }, timeout: 20000 }),
+  /**
+   * 导出做题本 PDF 的地址（带令牌，喂给 fetch 取 blob 再存盘）。
+   * 导出是**服务端真出文件**（本机 Chrome 的 `--print-to-pdf`），要十几秒 —— 调用方得给 loading。
+   * `book: 'sentence'` 出的是英语「每日一句」那本（传 Day 区间 from/to，选项换成含不含词汇）。
+   */
+  zuotibenExportUrl: async (q: {
+    book?: 'problem' | 'sentence'
+    date?: string
+    from?: number
+    to?: number
+    mode?: string
+    orient?: string
+    note?: boolean
+    vocab?: boolean
+    ansLayout?: string
+  } = {}) => {
+    const t = await ensureToken()
+    const p = new URLSearchParams({
+      ...(q.book === 'sentence' ? { book: 'sentence' } : {}),
+      ...(q.date ? { date: q.date } : {}),
+      ...(q.from ? { from: String(q.from) } : {}),
+      ...(q.to ? { to: String(q.to) } : {}),
+      mode: q.mode ?? 'blank',
+      orient: q.orient ?? 'landscape',
+      note: q.note ? '1' : '0',
+      ...(q.vocab ? { vocab: '1' } : {}),
+      ...(q.ansLayout === 'page' ? { anslayout: 'page' } : {}),
+      ...(t ? { token: t } : {}),
+    })
+    return `${base}/api/zuotiben/export?${p.toString()}`
+  },
+  zuotibenExports: () => call('/api/zuotiben/exports', { timeout: 20000 }),
 }
 
 export type MemoSummaryEvent =
@@ -593,7 +695,7 @@ export async function ensureSidecar(force = false): Promise<boolean> {
 
 /** 在组件里用：等待边车就绪；未就绪时给出可复制的启动提示 */
 export function sidecarHint(): string {
-  return '在项目根目录运行 npm run server，或双击 启动工作站.cmd'
+  return '在工作站目录运行 npm run server，或双击 启动工作站.cmd'
 }
 
 /* ------------------------------------------------- 流式（知识库问答） --- */
@@ -603,7 +705,25 @@ export interface WikiChatEvent {
   type: 'tool' | 'delta' | 'reasoning' | 'done' | 'error' | 'end'
   /** tool：工具名（检索 / 补检索） */
   name?: string
+  /**
+   * tool：这一步的稳定标识。**心跳这类会反复下发的步骤必须有它** ——
+   * 前端按 id 原地更新同一行；没有 id 时每次下发都会被当成新的一步、在链上追加一行。
+   */
+  id?: string
   detail?: string
+  /**
+   * tool 的结构化字段（2026-09-27 起服务端下发）。
+   *
+   * 原来只有拼在 `detail` 里的中文前缀（「失败：」「跳过：」「……（120ms）」），
+   * 界面要判断成败只能去匹配字符串 —— 服务端改一句话就静默全变成「成功」。
+   * 现在这三项由服务端直给，`AiThoughts` 的图标与耗时有据可依。
+   * 老服务端不带这些字段，前端一律按「缺省即成功」处理。
+   */
+  status?: 'running' | 'ok' | 'fail' | 'skip'
+  /** 这一步耗时（毫秒） */
+  ms?: number
+  /** 这一步的产出条数（命中几页 / 取回几条） */
+  count?: number
   text?: string
   error?: string
   sessionId?: string
@@ -617,7 +737,7 @@ export interface WikiChatEvent {
 
 /**
  * 知识库流式问答：边车把「检索 → 补检索 → 逐字作答」按帧下发。
- * 与语音随记那条流同一套读法（都在 core/sse.ts）。
+ * 与测聊那条流同一套读法（都在 core/sse.ts）。
  */
 export async function wikiChatStream(
   body: {
@@ -629,7 +749,7 @@ export async function wikiChatStream(
     skills?: string[]
     deep?: boolean
     topK?: number
-    /** 检索来源开关：库内永远开，网络 / 本机文件按需 */
+    /** 检索来源开关（对照桌面端 chat 的 tools）：库内永远开，网络 / 本机文件按需 */
     tools?: { web?: boolean; anytxt?: boolean }
     retrieval?: {
       webTopK?: number

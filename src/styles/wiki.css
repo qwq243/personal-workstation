@@ -20,20 +20,26 @@
 
 /* 页面容器：所有知识库子页共用的纵向节奏与留白。
  *
- * 与 `.ws-page` 同款（28px 上 / 32px 侧 / 72px 下），只在最大宽度上取「宽」档：
- * 知识库有图谱和三栏阅读器，1120 会把画布挤窄。
+ * 与 `.ws-page` **同款**（28px 上 / 32px 侧 / 72px 下，宽度都走 `--ws-page-max` 居中）：
+ * 宽度全站只有 `--ws-page-max` 一处决定，知识库不自己定一档
+ * （2026-09-27 改：原来这里是 1320 居中，大屏上左右各白留 200 多 px；
+ *  现在跟随全站上限，宽屏上只留一圈合理的余量）。
  * 顶部多出的 6px 与库信息条之间靠 .libbar 自己再压一点，省得缝看着比内容还宽。 */
 .wk-page {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  max-width: 1320px;
+  width: 100%;
+  min-width: 0;
+  max-width: var(--ws-page-max);
   margin: 0 auto;
   padding: 28px 32px 72px;
 }
 
 /* 嵌在别的面板里的内容块：同样的纵向节奏，但**不带全页留白**
-   （那种留白属于最外层的 .wk-page；嵌进去再带一次就会「缝套缝」） */
+   （那种留白属于最外层的 .wk-page；嵌进去再带一次就会「缝套缝」）。
+   设置页那几节（大模型 / 语义检索 / 网络搜索）就是这种：它们是被 .ws-page 抱着的内嵌块，
+   用这个、别用 .wk-page —— 2026-09-27 修：那时它们带着整页留白嵌在卡片里，白边套白边。 */
 .wk-stack {
   display: flex;
   flex-direction: column;
@@ -60,6 +66,34 @@
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 12px;
+}
+/* 卡片头在手机上挤不下时换行，标题也不参与压缩
+   （实测「模型预设」被右侧控件压成 14px 宽、竖排 4 行） */
+@media (max-width: 760px) {
+  .wk-card__head {
+    flex-wrap: wrap;
+  }
+  .wk-card__head > :first-child {
+    flex: none;
+    white-space: nowrap;
+  }
+  /* 胶囊/列表行里的小按钮：21~23px 高在手机上太难点，统一抬到 28~30（2026-09-29） */
+  .wk-chip {
+    min-height: 28px;
+  }
+  .wk-chips .wk-chip {
+    min-height: 30px;
+  }
+  .wk-list__row button {
+    min-height: 28px;
+    min-width: 28px;
+  }
+  /* 卡片头/设置行里的文字按钮（「打开 log.md」「语义检索」这类）只有 21px 高 */
+  .wk-card__head button,
+  .wk-card__head .el-button,
+  .wk-card__head > .ws-dim button {
+    min-height: 28px;
+  }
 }
 .wk-card--flush .wk-card__head {
   margin: 0;
@@ -379,4 +413,25 @@ button.wk-list__row:hover .wk-list__title {
   border: 1px solid var(--ws-border);
   border-radius: var(--ws-radius-sm);
   background: var(--ws-panel-2);
+}
+
+/* 手机档留白：与 `.ws-page` 同款（那条写在 index.css 的手机档区块里）。
+   分两处是因为这两个类在不同文件，而 wiki.css 在 main.ts 里是**后**引入的 ——
+   同优先级后加载的赢，写在 index.css 会被这里的 `.wk-page` 盖掉，
+   所以只能在 `.wk-page` 自己所在的文件覆盖。数字与 index.css 那边保持一致。 */
+@media (max-width: 760px) {
+  .wk-page {
+    padding: 16px 14px 48px;
+  }
+
+  /* .wk-table 没有固定列宽（`width: 100%` + 自动分配），它在手机上的溢出只有两个来源：
+     表头的 `white-space: nowrap`，和单元格里不可断的长串（模型名、目录路径、哈希）。
+     两条都放开之后这些表自己就会换行，不必逐张转卡片 ——
+     真正需要转卡片的是那些列多、每列都是独立语义的表（库列表、入库队列）。 */
+  .wk-table th {
+    white-space: normal;
+  }
+  .wk-table td {
+    overflow-wrap: anywhere;
+  }
 }

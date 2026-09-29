@@ -19,7 +19,7 @@ export const wikiModule: WorkstationModule = {
   icon: 'FolderOpened',
   color: '#7c3aed',
   category: 'study',
-  order: 31,
+  order: 12,
   homePath: '/wiki',
   routes: [
     { path: '/wiki', name: 'wiki-home', component: WORKSPACE, meta: { title: '库', icon: 'FolderOpened' } },

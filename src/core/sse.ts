@@ -1,14 +1,14 @@
 /**
- * 边车 SSE 流的公共读法（两条流式调用共用一份，别各写一遍）。
+ * 边车 SSE 流的公共读法（三条流式调用共用一份，别各写一遍）。
  *
  * 为什么不用 EventSource：它只能发 GET（对话体要 POST），也不能带自定义头
  * —— 边车的 X-WS-Token 就传不过去。所以这里手动读 ReadableStream，按 SSE 的
  * 「空行分帧」自己切：`data:` 后面那段 JSON 解析出来交给 onEvent，半帧丢掉下一轮补。
  *
  * 这一层只负责「解析出对象并交出去」，不规定帧的形状：
- * 语音随记与知识库问答都是 `{ type: … }`，各由调用方自己认。
- * 失败也不替调用方措辞 —— 经 onFailure 交回原因，
- * 由它决定发什么事件（那两条流的错误事件形状本来就不一样）。
+ * 语音随记 / 知识库是 `{ type: … }`，测聊是扁平字段（`{ delta }` / `{ done: true }`），
+ * 各由调用方自己认。失败也不替调用方措辞 —— 经 onFailure 交回原因，
+ * 由它决定发什么事件（那三条流的错误事件形状本来就不一样）。
  */
 
 /** 解析好的一帧；形状由各自的流约定，这里不解释 */
@@ -28,7 +28,7 @@ export interface SseStreamOptions {
   headers?: Record<string, string>
   /** 取访问令牌的路子（就是 call() 用的 ensureToken：拿到了才加 X-WS-Token） */
   getToken?: () => Promise<string | null>
-  /** 整个过程的上限；超时按 abort 处理，不单独发事件（现在两个调用点都没传） */
+  /** 整个过程的上限；超时按 abort 处理，不单独发事件（现在三个调用点都没传） */
   timeoutMs?: number
   /** 失败回调；abort 也会回调，要不要发声由调用方定 */
   onFailure?: (f: SseFailure) => void

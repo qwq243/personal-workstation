@@ -4,11 +4,11 @@ import { createPinia } from 'pinia'
 // ↓ 新图标加在这里（import 与 ICONS 两处）
 import {
   Aim, AlarmClock, ArrowDown, ArrowLeft, ArrowRight, Bell, Box, Briefcase, Calendar, ChatDotRound,
-  Checked, CircleCheck, CircleCheckFilled, CircleCloseFilled, Clock, Close, CloseBold, Cloudy, Coin, Compass, Connection, CopyDocument, DataBoard,
+  CaretBottom, CaretRight, Checked, CircleCheck, CircleCheckFilled, CircleCloseFilled, Clock, Close, CloseBold, Cloudy, Coin, Compass, Connection, CopyDocument, Cpu, DataBoard,
   DataLine,
-  Delete, Document, Download, EditPen, Expand, Files, Finished, Flag, Fold, FolderOpened, Grid, Headset, Hide, Histogram, InfoFilled, Iphone, Key, Link,
-  List, Location, MagicStick, Microphone, Minus, Monitor, Moon, MoreFilled, Notebook, Opportunity, Picture, Plus, Reading, Refresh, RefreshRight,
-  Right, Search, Select, Setting, Share, SuccessFilled, Sunny, Switch, SwitchButton, Timer, TrendCharts, Trophy,
+  Delete, Document, Download, EditPen, Expand, Film, Files, Finished, Flag, Fold, FolderOpened, Grid, Headset, Hide, Histogram, InfoFilled, Iphone, Key, Link, Loading,
+  List, Location, MagicStick, Menu, Microphone, Minus, Monitor, Moon, MoreFilled, Notebook, Opportunity, Picture, Plus, Printer, Promotion, Reading, Refresh, RefreshRight,
+  Right, Search, Select, Setting, Share, Star, StarFilled, SuccessFilled, Sunny, Switch, SwitchButton, Timer, Tools, TrendCharts, Trophy,
   Upload, User, UserFilled, VideoCamera, VideoPause, VideoPlay, View, Wallet, WarningFilled,
 } from '@element-plus/icons-vue'
 
@@ -31,6 +31,8 @@ import App from './App.vue'
 import { createAppRouter, takeResumePath } from './router'
 import { registerAllModules } from './features'
 import { loadAppConfig } from './core/appconfig'
+import { getModules } from '@/core/registry'
+import { MODULE_GROUPS } from '@/core/types'
 
 // 先注册功能模块，再创建路由（路由表由注册表派生）
 registerAllModules()
@@ -60,16 +62,31 @@ app.use(createPinia())
 // ↓ 新图标加在这里（import 与 ICONS 两处）
 const ICONS: Record<string, Component> = {
   Aim, AlarmClock, ArrowDown, ArrowLeft, ArrowRight, Bell, Box, Briefcase, Calendar, ChatDotRound,
-  Checked, CircleCheck, CircleCheckFilled, CircleCloseFilled, Clock, Close, CloseBold, Cloudy, Coin, Compass, Connection, CopyDocument, DataBoard,
+  CaretBottom, CaretRight, Checked, CircleCheck, CircleCheckFilled, CircleCloseFilled, Clock, Close, CloseBold, Cloudy, Coin, Compass, Connection, CopyDocument, Cpu, DataBoard,
   DataLine,
-  Delete, Document, Download, EditPen, Expand, Files, Finished, Flag, Fold, FolderOpened, Grid, Headset, Hide, Histogram, InfoFilled, Iphone, Key, Link,
-  List, Location, MagicStick, Microphone, Minus, Monitor, Moon, MoreFilled, Notebook, Opportunity, Picture, Plus, Reading, Refresh, RefreshRight,
-  Right, Search, Select, Setting, Share, SuccessFilled, Sunny, Switch, SwitchButton, Timer, TrendCharts, Trophy,
+  Delete, Document, Download, EditPen, Expand, Film, Files, Finished, Flag, Fold, FolderOpened, Grid, Headset, Hide, Histogram, InfoFilled, Iphone, Key, Link, Loading,
+  List, Location, MagicStick, Menu, Microphone, Minus, Monitor, Moon, MoreFilled, Notebook, Opportunity, Picture, Plus, Printer, Promotion, Reading, Refresh, RefreshRight,
+  Right, Search, Select, Setting, Share, Star, StarFilled, SuccessFilled, Sunny, Switch, SwitchButton, Timer, Tools, TrendCharts, Trophy,
   Upload, User, UserFilled, VideoCamera, VideoPause, VideoPlay, View, Wallet, WarningFilled,
 }
 
 for (const [name, comp] of Object.entries(ICONS)) {
   app.component(name, comp)
+}
+
+/**
+ * 图标自检：模块与分组的 `icon` 是按字符串解析的，漏进上面两份列表**不会报错**，
+ * 只是那一处空白。大写字母开头的一律按组件名看待（emoji 那类跳过，它本来就该按纯文本渲染）。
+ */
+for (const mod of getModules()) {
+  if (/^[A-Z]/.test(mod.icon) && !ICONS[mod.icon]) {
+    console.warn(`[icons] 功能「${mod.name}」的图标 ${mod.icon} 不在白名单里，会显示为空白（src/main.ts）`)
+  }
+}
+for (const g of MODULE_GROUPS) {
+  if (/^[A-Z]/.test(g.icon) && !ICONS[g.icon]) {
+    console.warn(`[icons] 分组「${g.name}」的图标 ${g.icon} 不在白名单里，会显示为空白（src/main.ts）`)
+  }
 }
 
 /**

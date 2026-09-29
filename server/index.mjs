@@ -37,7 +37,27 @@ import * as wikiWeb from './lib/wiki-websearch.mjs'
 import * as singleton from './lib/singleton.mjs'
 import * as memo from './lib/memo.mjs'
 import * as hotwords from './lib/hotwords.mjs'
+import * as newsfeed from './lib/newsfeed.mjs'
+import * as newsBoard from './lib/news-board.mjs'
+import * as zuotiben from './lib/zuotiben.mjs'
+import * as zuotibenExport from './lib/zuotiben-export.mjs'
+import * as zuotibenSuggest from './lib/zuotiben-suggest.mjs'
+import * as tts from './lib/tts.mjs'
 import { handleMcp } from './mcp.mjs'
+
+/**
+ * 边车版本号：直接读 package.json。
+ *
+ * 别在代码里手写一份 —— 那必然会在某次「改了 package.json 忘了改这儿」之后漂掉，
+ * 而 /api/health 的 version 正是「页面连的是不是这一份代码」的第一条判据。
+ */
+const PKG_VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'package.json'), 'utf8')).version ?? '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+})()
 
 const cfg = loadConfig()
 // 把「错放在 wiki 里的全站配置」搬到顶层（大模型 / 嵌入 / 检索 / 文档解析 / 网络 / 输出）
@@ -131,7 +151,7 @@ function route(method, pattern, handler) {
 route('GET', /^\/api\/health$/, async () => ({
   ok: true,
   service: 'workstation',
-  version: '0.1.0',
+  version: PKG_VERSION,
   port: PORT,
   configPath: CONFIG_PATH,
   time: Date.now(),
@@ -142,7 +162,7 @@ route('GET', /^\/api\/health$/, async () => ({
  *  1. 内存缓存 20s —— 多页切换/看板轮询瞬时返回；
  *  2. 磁盘缓存 data/cache/overview.json —— 边车重启后首屏立即有数据；
  *  3. stale-while-revalidate —— 缓存过期时**立即返回旧值**（标 stale），后台刷新供下次用，
- *     看板永远不等外部接口（课表/待办/余额冷拉要 2~10s）；
+ *     看板永远不等外部接口（冷拉要 2~10s）；
  *  4. 边车启动 2s 后预热一次 —— 正常「双击启动 → 打开页面」全程命中缓存；
  *  5. 服务状态与 AI 上下文复用同一个 serviceStatus() Promise，不再一次查两遍。
  *  ?force=1 是唯一现场重拉的路径（设置页/排查用）。 */
@@ -430,6 +450,22 @@ route('POST', /^\/api\/dashboard\/note\/remove$/, (req, { body, query }) =>
   dashboard.removeNote(query.date ?? dashboard.todayStr(), body.id),
 )
 
+/* --- 朗读（edge-tts 合成整句；与背单词那套真人音频分工不同） ---
+ * 没配工具目录（`tts.dir`）时 status 会说明原因，前端据此回落浏览器朗读。
+ */
+route('GET', /^\/api\/tts\/status$/, () => tts.status())
+/** 合成并回一段 mp3（带缓存；文本上限 800 字，见 lib/tts.mjs 的 MAX_TEXT） */
+route('GET', /^\/api\/tts\/speak$/, async (req, { query, res }) => {
+  const r = await tts.speak({ text: query.text, voice: query.voice, rate: query.rate })
+  if (!r.ok) {
+    res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify({ ok: false, error: r.error }))
+    return 'handled'
+  }
+  tts.pipeAudio(req, res, r.file)
+  return 'handled'
+})
+
 /* --- 每日一句（句库自备，见 docs/每日一句导入.md） --- */
 /** 当前句 + 进度 + 计划推算：指针不自动走，做完才 +1（规则见 lib/english-daily.mjs 头注释） */
 route('GET', /^\/api\/english\/daily$/, () => englishDaily.current())
@@ -443,6 +479,8 @@ route('GET', /^\/api\/english\/daily\/log$/, (req, { query }) => englishDaily.lo
 route('POST', /^\/api\/english\/daily\/complete$/, (req, { body }) => englishDaily.complete(body ?? {}))
 /** 误触复位：删某天的打卡并把指针拉回第一个未完成句（只给智能体/自救用） */
 route('POST', /^\/api\/english\/daily\/undo$/, (req, { body }) => englishDaily.undoDate(String(body?.date ?? '')))
+/** Day 区间取句（做题本的「每日一句」那本与它的打印页用；上限 120 句） */
+route('GET', /^\/api\/english\/daily\/sheet$/, (req, { query }) => englishDaily.sheet({ from: query.from, to: query.to }))
 
 /* --- 规划台（项目管理 + 备考清单 + 倒计时） --- */
 /**
@@ -551,7 +589,7 @@ route('POST', /^\/api\/ai\/summary$/, (req, { body }) =>
   }),
 )
 /**
- * 今天的行动建议：由「昨天的总结 + 今天的课表/待办/临近截止」现算，单独存档。
+ * 今天的行动建议：由「昨天的总结 + 今天的计划、词单与做题进度」现算，单独存档。
  * 与 recap 分开存 —— 一个回答「昨天怎么样」，一个回答「今天怎么过」，生命周期不同。
  */
 route('POST', /^\/api\/ai\/today$/, (req, { body }) =>
@@ -994,6 +1032,117 @@ route('PATCH', /^\/api\/config$/, (req, { body }) => {
   return { ok: true, saved: Object.keys(clean), rejected, config: publicConfig(), path: CONFIG_PATH }
 })
 
+
+/* ---------------------------------------------------------------- 资讯 ---
+ * 读采集器的产物目录（配置 `collector.dir`，格式见 docs/news-contract.md）。
+ * **采集不在这里做**：采集器是独立进程（scripts/collector-skeleton.mjs 是个最小示例），
+ * 边车只负责读与算（分类 / 热度 / 时间线 / 案卷 / AI 事件卡）。
+ */
+route('GET', /^\/api\/news\/feed$/, () => newsfeed.feed())
+route('GET', /^\/api\/news\/dashboard$/, (req, { query }) => newsBoard.dashboard({ force: query.force === '1' }))
+route('POST', /^\/api\/news\/feedback$/, (req, { body }) => newsBoard.feedback(body))
+route('POST', /^\/api\/news\/apply$/, (req, { body }) => newsBoard.apply(body))
+route('POST', /^\/api\/news\/track$/, (req, { body }) => newsBoard.track(body))
+route('GET', /^\/api\/news\/follow-status$/, () => newsBoard.followStatus())
+route('POST', /^\/api\/news\/follow-push$/, () => newsBoard.followPush())
+/** 现在概括：把最新一批原始条目交给模型，变成 AI 事件卡（要等它跑完） */
+route('POST', /^\/api\/news\/digest$/, async () => {
+  const d = await newsBoard.dashboard({ force: false })
+  if (!d.ok) return d
+  const r = await newsBoard.digestNow(d._rawItems ?? [])
+  return r
+})
+route('GET', /^\/api\/news\/batches$/, (req, { query }) => newsfeed.batches(Number(query.limit) || 8))
+route('GET', /^\/api\/news\/timeline$/, (req, { query }) => newsfeed.timeline(String(query.id ?? '')))
+route('GET', /^\/api\/news\/case$/, (req, { query }) => newsfeed.caseFile(String(query.id ?? '')))
+route('GET', /^\/api\/news\/reports$/, (req, { query }) => newsfeed.reports(Number(query.limit) || 20))
+route('GET', /^\/api\/news\/report$/, (req, { query }) => newsfeed.report(String(query.file ?? '')))
+
+/* -------------------------------------------------------------- 做题本 ---
+ * 数据在 server/data/zuotiben.json，前端与智能体读写同一份。
+ * **渲染不在这边**：一题一页的版式与公式排版走前端 `#/zuotiben/print`（复用 KaTeX 那套），
+ * 服务端只出数据，免得两套公式管线要同时维护。
+ */
+route('GET', /^\/api\/zuotiben\/day$/, (req, { query }) => zuotiben.getDay(query.date))
+route('GET', /^\/api\/zuotiben\/days$/, () => ({ ok: true, days: zuotiben.listDays(), stats: zuotiben.stats() }))
+route('GET', /^\/api\/zuotiben\/range$/, (req, { query }) => ({ ok: true, problems: zuotiben.listRange({ from: query.from, to: query.to }) }))
+/** 页眉右边的日期范围（「YYYY.MM.01 - YYYY.MM.末」这种参照物） */
+route('GET', /^\/api\/zuotiben\/range-label$/, (req, { query }) => ({ ok: true, label: zuotiben.rangeLabel(query.date) }))
+route('POST', /^\/api\/zuotiben\/add$/, (req, { body }) => zuotiben.addProblems({ ...(body ?? {}), source: 'web' }))
+route('POST', /^\/api\/zuotiben\/problem$/, (req, { body }) =>
+  // source 显式给 'web'：网页上点的和智能体写的要分得出来（不然 savedBy 全是 agent）
+  zuotiben.updateProblem({ date: body?.date, id: body?.id, patch: { ...(body?.patch ?? {}), source: 'web' } }),
+)
+route('POST', /^\/api\/zuotiben\/remove$/, (req, { body }) =>
+  zuotiben.removeProblem({ date: body?.date, id: body?.id, source: 'web' }),
+)
+route('POST', /^\/api\/zuotiben\/clear$/, (req, { body }) => zuotiben.clearDay({ date: body?.date, source: 'web' }))
+
+/**
+ * 导出 PDF：**真出文件**（本机 Chrome 的 `--print-to-pdf`），直接把字节回给浏览器下载。
+ *
+ * 为什么是 GET：前端拿 `fetch` 取了再转 blob 存盘，这样点一下就是「下载」，
+ * 不会像 `window.open` 那样先跳一个页面出来。
+ * 生成要十几秒，所以前端得配 loading；起不来浏览器（没装 Chrome/Edge）会回 400 + JSON 原因。
+ */
+route('GET', /^\/api\/zuotiben\/export$/, async (req, { query, res }) => {
+  const r = await zuotibenExport.exportPdf({
+    // 用请求自带的主机名，省得把端口写死（改端口时这里不用跟着改）
+    baseUrl: `http://${req.headers.host || '127.0.0.1:5278'}`,
+    // book=sentence 就是英语「每日一句」那本（走 #/zuotiben/sentence-print），默认是数学题目本
+    book: query.book === 'sentence' ? 'sentence' : 'problem',
+    date: query.date,
+    from: query.from,
+    to: query.to,
+    mode: query.mode,
+    orient: query.orient,
+    withNote: query.note === '1',
+    withVocab: query.vocab === '1',
+    ansLayout: query.anslayout,
+  })
+  if (!r.ok) {
+    res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify({ ok: false, error: r.error }))
+    return 'handled'
+  }
+  res.writeHead(200, {
+    'Content-Type': 'application/pdf',
+    'Content-Length': String(r.bytes),
+    // filename* 用 UTF-8 编码，中文名才不会变成乱码
+    'Content-Disposition': `attachment; filename="${r.name.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(r.name)}`,
+    'Cache-Control': 'no-store',
+  })
+  fs.createReadStream(r.file).pipe(res)
+  return 'handled'
+})
+/** 导出记录（排查「导过了但找不到文件」用） */
+route('GET', /^\/api\/zuotiben\/exports$/, () => zuotibenExport.info())
+
+/* --- 做题本：给智能体的三个口（作答总结 / 已学范围 / 推荐同类题） --- */
+route('GET', /^\/api\/zuotiben\/review$/, (req, { query }) =>
+  zuotiben.review({ date: query.date, from: query.from, to: query.to }),
+)
+route('GET', /^\/api\/zuotiben\/scope$/, () => ({ ok: true, scope: zuotiben.getScope() }))
+/** 已学范围由智能体核过进度后写进来 —— 推荐同类题拿它当过滤器 */
+route('POST', /^\/api\/zuotiben\/scope$/, (req, { body }) => zuotiben.setScope(body ?? {}))
+/** 题库池总览（有哪些章、每章题数、解析齐不齐）—— 题库文件要自己按 docs/zuotiben-import.md 备 */
+route('GET', /^\/api\/zuotiben\/pool$/, () => zuotibenSuggest.poolInfo())
+/** 推荐同类题：按章/关键词筛、排掉做过的，返回可直接灌进做题本的题 */
+route('GET', /^\/api\/zuotiben\/suggest$/, (req, { query }) =>
+  zuotibenSuggest.suggestProblems({
+    basis: query.basis,
+    chapters: String(query.chapters ?? '')
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter(Boolean),
+    keywords: String(query.keywords ?? '')
+      .split(/[,，|]/)
+      .map((s) => s.trim())
+      .filter(Boolean),
+    limit: Number(query.limit) || 8,
+  }),
+)
+
 /* ---------------------------------------------------- 语音随记（音频+转写） ---
  *
  * 链路：给一段音频 → 转写后端（OpenAI 兼容 /audio/transcriptions，见 lib/asr.mjs）
@@ -1009,8 +1158,11 @@ route('GET', /^\/api\/memo\/status$/, () => memo.status())
 /** 转写后端配了没有 + 支持哪些音频格式（页面据此显示引导或操作区） */
 route('GET', /^\/api\/memo\/asr$/, () => ({ ok: true, ...memo.asrStatus() }))
 
+/** 改转写后端（设置页/随记配置页用）。密钥走 credentials.json，页面只拿得到末四位提示 */
+route('POST', /^\/api\/memo\/asr$/, (req, { body }) => memo.setAsrBackend(body ?? {}))
+
 /**
- * 上传音频（application/octet-stream + ?name=xx.wav），落进 data/memo/inbox/，返回绝对路径。
+ * 上传音频（application/octet-stream + ?name=xx.wav），落进 data/memo/audio/，返回绝对路径。
  * 与知识库的上传同一条路数：二进制不走 JSON，别把它塞进 body。
  */
 route('POST', /^\/api\/memo\/upload$/, (req, { body, query }) => {
@@ -1084,6 +1236,11 @@ route('POST', /^\/api\/memo\/focus$/, (req, { body }) => memo.setFocus(String(bo
 
 /* 原始音频回放：按 Range 给 <audio>（拖进度条靠 206）；令牌走 ?token= */
 route('GET', /^\/api\/memo\/audio$/, (req, { query, res }) => memo.streamAudio(req, res, String(query.id ?? '')))
+/* 音频占用的两个口写在更宽的 /audio 之前，别被它抢走 */
+route('GET', /^\/api\/memo\/audio\/usage$/, () => ({ ok: true, ...memo.audioUsage() }))
+route('POST', /^\/api\/memo\/audio\/remove$/, (req, { body }) => memo.removeAudio(String(body?.id ?? '')))
+/** 路径总览（数据目录 / 记录 / 音频 / 任务分别在哪） */
+route('GET', /^\/api\/memo\/dir$/, () => ({ ok: true, ...memo.dir() }))
 
 route('POST', /^\/api\/memo\/summarize$/, (req, { body }) =>
   timed('memo.summarize', () => memo.resummarize(String(body?.id ?? ''), { model: body?.model })))

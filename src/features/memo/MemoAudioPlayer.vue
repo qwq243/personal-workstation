@@ -3,16 +3,19 @@
  * 原始音频播放器（记录详情用）。
  *
  * `<audio>` 读边车那条支持 Range 的接口（`/api/memo/audio`）—— 拖进度条靠 206 + Content-Range，
- * 一次给完整文件的话每次跳都得重下。样式全自己做：浏览器的原生 `<audio>` 跟工作站这套壳不搭。
+ * 一次给完整文件的话每次跳都得重下。播放位置用 `timeupdate` 抛给父组件（父组件还能反向调 `seek()`）。
+ * 样式一律自己做：浏览器的原生 `<audio>` 跟工作站这套壳不搭（类名在 memo.css 里，三个页面共用）。
  */
 import { onBeforeUnmount, ref, watch } from 'vue'
 
-const props = defineProps<{ url: string; title?: string }>()
+const props = defineProps<{ record: any; url: string }>()
+const emit = defineEmits<{ (e: 'time', sec: number): void }>()
 
 const el = ref<HTMLAudioElement | null>(null)
 const playing = ref(false)
 const cur = ref(0)
-const total = ref(0)
+/** 初值取记录上的时长（服务端能从 WAV 头读出来时才有）；元数据到了会被真实值覆盖 */
+const total = ref(Number(props.record?.audio?.seconds ?? 0))
 const rate = ref(1)
 const broken = ref('')
 const track = ref<HTMLElement | null>(null)
@@ -26,7 +29,11 @@ function clock(sec: number) {
   const s = t % 60
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
+
 const percent = () => (total.value ? Math.min(100, (cur.value / total.value) * 100) : 0)
+
+/** 下载名：优先用上传时的原文件名（扩展名是真实的那一个，别一律写 .wav） */
+const fileName = () => String(props.record?.audio?.name || `${props.record?.title || 'memo'}.wav`)
 
 async function toggle() {
   const a = el.value
@@ -49,9 +56,10 @@ function seek(sec: number) {
   try {
     a.currentTime = target
   } catch {
-    /* 元数据还没到，等 loadedmetadata 再说 */
+    /* 元数据还没加载好，等 loadedmetadata 后父组件再跳 */
   }
   cur.value = target
+  emit('time', target)
 }
 
 function setRate(value: number) {
@@ -76,12 +84,17 @@ function onMove(e: PointerEvent) {
 function onUp() {
   dragging.value = false
 }
+
 function onMeta() {
   const a = el.value
-  if (a && Number.isFinite(a.duration)) total.value = a.duration
+  if (!a) return
+  if (Number.isFinite(a.duration) && a.duration > 0) total.value = a.duration
 }
 function onTime() {
-  if (el.value) cur.value = el.value.currentTime
+  const a = el.value
+  if (!a) return
+  cur.value = a.currentTime
+  emit('time', a.currentTime)
 }
 
 watch(
@@ -109,7 +122,7 @@ defineExpose({ seek })
       @ended="playing = false"
       @timeupdate="onTime"
       @loadedmetadata="onMeta"
-      @error="broken = '音频读不出来（文件被删了？）'"
+      @error="broken = '音频读不出来（文件可能被删了）'"
     />
 
     <button class="audio__btn" :title="playing ? '暂停' : '播放'" @click="toggle">
@@ -131,7 +144,7 @@ defineExpose({ seek })
       </div>
       <div class="audio__meta">
         <span class="audio__time">{{ clock(cur) }} / {{ clock(total) }}</span>
-        <span class="ws-dim">原始音频</span>
+        <span class="ws-dim">原始音频 · 拖动进度条跳着听</span>
         <span v-if="broken" class="audio__err">{{ broken }}</span>
       </div>
     </div>
@@ -145,105 +158,8 @@ defineExpose({ seek })
       </template>
     </el-dropdown>
 
-    <a class="audio__dl" :href="url" :download="title || 'memo'" title="下载音频">
+    <a class="audio__dl" :href="url" :download="fileName()" title="下载音频">
       <el-icon><Download /></el-icon>
     </a>
   </div>
 </template>
-
-<style scoped>
-.audio {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border: 1px solid var(--el-color-primary-light-7);
-  border-radius: var(--ws-radius);
-  background: var(--el-color-primary-light-9);
-}
-.audio__btn {
-  flex: 0 0 auto;
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: 999px;
-  background: var(--ws-accent);
-  color: #fff;
-  font-size: 17px;
-  cursor: pointer;
-}
-.audio__btn:active {
-  transform: scale(0.96);
-}
-.audio__body {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.audio__track {
-  position: relative;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--el-fill-color-dark, #e5e7eb);
-  cursor: pointer;
-  touch-action: none;
-}
-.audio__fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  border-radius: 999px;
-  background: var(--ws-accent);
-}
-.audio__knob {
-  position: absolute;
-  top: 50%;
-  width: 14px;
-  height: 14px;
-  margin-left: -7px;
-  border: 2px solid var(--ws-accent);
-  border-radius: 999px;
-  background: #fff;
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-.audio__meta {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-top: 5px;
-  font-size: 11.5px;
-  color: var(--ws-text-3);
-}
-.audio__time {
-  color: var(--ws-text-2);
-  font-family: var(--ws-mono);
-}
-.audio__err {
-  color: var(--el-color-danger);
-}
-.audio__rate,
-.audio__dl {
-  flex: 0 0 auto;
-  padding: 3px 8px;
-  border: 1px solid var(--ws-border);
-  border-radius: 999px;
-  background: var(--ws-panel);
-  color: var(--ws-text-2);
-  font-family: var(--ws-mono);
-  font-size: 11.5px;
-  line-height: 16px;
-  cursor: pointer;
-}
-.audio__dl {
-  display: grid;
-  place-items: center;
-}
-.audio__rate:hover,
-.audio__dl:hover {
-  border-color: var(--ws-accent);
-  color: var(--ws-accent);
-}
-</style>

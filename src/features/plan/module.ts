@@ -12,7 +12,7 @@ export const planModule: WorkstationModule = {
   icon: 'Flag',
   color: '#4f46e5',
   category: 'office',
-  order: 24,
+  order: 42,
   homePath: '/plan',
   routes: [
     {

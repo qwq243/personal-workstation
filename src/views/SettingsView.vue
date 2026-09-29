@@ -4,6 +4,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import { useUiStore, type ThemeMode } from '@/core/ui'
 import { exportAll, importAll, listKeys, loadJSON, removeJSON, usedBytes } from '@/core/storage'
 import { getModules } from '@/core/registry'
+import { leafMap, RECOMMENDED_PINS } from '@/core/leaf-pages'
 import { api, ensureSidecar, sidecarBase, sidecarState } from '@/core/sidecar'
 import LlmSection from '@/features/settings/LlmSection.vue'
 import EmbeddingSection from '@/features/settings/EmbeddingSection.vue'
@@ -38,10 +39,38 @@ const sizeText = computed(() => {
 })
 
 const themeOptions: { label: string; value: ThemeMode }[] = [
+  { label: '按时间自动', value: 'auto' },
   { label: '浅色', value: 'light' },
   { label: '深色', value: 'dark' },
-  { label: '跟随系统', value: 'auto' },
+  { label: '跟随系统', value: 'system' },
 ]
+
+/**
+ * 暗色时段。用 computed 双向绑到 store，改一下就落盘（store 里 watch 了）。
+ * 写成一行会很不像话，所以按块写。
+ */
+const darkFrom = computed({
+  get: () => ui.themeWindow.darkFrom,
+  set: (v: string) => v && ui.setThemeWindow({ darkFrom: v }),
+})
+const darkTo = computed({
+  get: () => ui.themeWindow.darkTo,
+  set: (v: string) => v && ui.setThemeWindow({ darkTo: v }),
+})
+
+/**
+ * 推荐置顶的那几页的名字（显示在「侧边栏置顶」那一行）。
+ * 名字从叶子页面表里取，不在这儿另抄一份 —— 换推荐清单只改 `leaf-pages.ts` 一处。
+ */
+const recommendedNames = computed(() =>
+  RECOMMENDED_PINS.map((p) => leafMap().get(p)?.title ?? p).join(' · '),
+)
+
+/** 把置顶换成推荐的那几页（备考每天要开的）；左栏那颗图钉随时能单独取消 */
+function useRecommendedPins() {
+  ui.applyRecommendedPins()
+  ElMessage.success('已按推荐置顶')
+}
 
 function refresh() {
   keys.value = listKeys()
@@ -123,6 +152,8 @@ async function copyMcp() {
    这类会被环境变化打破的东西（换个目录、端口被占、换成别处的服务）。
    服务端是白名单式 PATCH：没列上的字段会被拒绝并在 rejected 里点名，
    免得一个手滑把边车自己的配置写坏（写坏就连设置页都打不开了）。
+   ⇒ 所以这里**只放 CONFIG_EDITABLE / CONFIG_EDITABLE_SCALARS 放行过的字段**
+   （server/lib/config-editable.mjs），多一个都会让「保存」每次都带一条被拒提示。
 */
 const configForm = ref<any>(null)
 const configDefaults = ref<any>(null)
@@ -144,14 +175,6 @@ function toForm(c: any) {
       model: c?.asr?.model ?? '',
     },
     wiki: { dir: c?.wiki?.dir ?? '' },
-    docparse: {
-      tools: {
-        pandoc: c?.docparse?.tools?.pandoc ?? '',
-        soffice: c?.docparse?.tools?.soffice ?? '',
-        python: c?.docparse?.tools?.python ?? '',
-        pdftotext: c?.docparse?.tools?.pdftotext ?? '',
-      },
-    },
     pguard: { enabled: c?.pguard?.enabled !== false, dataDir: c?.pguard?.dataDir ?? '' },
     startupDir: c?.startupDir ?? '',
   }
@@ -184,7 +207,6 @@ async function saveConfigForm() {
       },
       asr: { provider: f.asr.provider, baseUrl: f.asr.baseUrl, model: f.asr.model },
       wiki: { dir: f.wiki.dir },
-      docparse: { tools: { ...f.docparse.tools } },
       pguard: { enabled: f.pguard.enabled, dataDir: f.pguard.dataDir },
       startupDir: f.startupDir,
     })
@@ -228,7 +250,7 @@ const docProbe = ref(null) as any
 const busyDoc = ref('')
 const outForm = ref({ language: 'Chinese' })
 const netForm = ref({ enabled: false, url: '' })
-const busyOut = ref('')
+const busyNet = ref('')
 const env = ref(null) as any
 
 async function loadGlobalCapabilities() {
@@ -275,17 +297,17 @@ async function testDoc() {
 }
 
 async function saveOut() {
-  busyOut.value = 'out'
+  busyNet.value = 'out'
   const r = await api.patchConfig({ outputLanguage: outForm.value.language })
-  busyOut.value = ''
+  busyNet.value = ''
   if (!r.ok) return ElMessage.error(r.error ?? '保存失败')
   ElMessage.success('已保存')
 }
 
 async function saveNet() {
-  busyOut.value = 'net'
+  busyNet.value = 'net'
   const r = await api.patchConfig({ network: { proxy: { enabled: netForm.value.enabled, url: netForm.value.url.trim() } } })
-  busyOut.value = ''
+  busyNet.value = ''
   if (!r.ok) return ElMessage.error(r.error ?? '保存失败')
   ElMessage.success('已保存（下一次外呼生效）')
 }
@@ -399,11 +421,11 @@ onMounted(loadGlobalCapabilities)
           <el-option label="English" value="English" />
           <el-option label="不强制（跟随资料）" value="auto" />
         </el-select>
-        <el-button size="small" :loading="busyOut === 'out'" @click="saveOut">保存</el-button>
+        <el-button size="small" :loading="busyNet === 'out'" @click="saveOut">保存</el-button>
         <span class="ws-spacer" />
         <el-checkbox v-model="netForm.enabled">走代理</el-checkbox>
         <el-input v-model="netForm.url" size="small" placeholder="http://127.0.0.1:7890" style="width: 220px" />
-        <el-button size="small" :loading="busyOut === 'net'" @click="saveNet">保存</el-button>
+        <el-button size="small" :loading="busyNet === 'net'" @click="saveNet">保存</el-button>
       </div>
       <div class="ws-dim" style="margin-top: 8px; font-size: 12.5px">
         编译与问答的提示词按「输出语言」写；代理只影响本模块自己的外呼（网络搜索 / 抓链接 / 云端解析）。
@@ -461,18 +483,6 @@ onMounted(loadGlobalCapabilities)
           <el-input v-model="configForm.wiki.dir" size="small" placeholder="C:\\资料\\我的知识库" />
         </div>
 
-        <div class="cfg-group">本机文档解析工具</div>
-        <div class="cfg-row">
-          <span class="cfg-label">留空自动找</span>
-          <el-input v-model="configForm.docparse.tools.pandoc" size="small" placeholder="pandoc（留空按 PATH 找）" />
-          <el-input v-model="configForm.docparse.tools.soffice" size="small" placeholder="soffice.com" />
-        </div>
-        <div class="cfg-row">
-          <span class="cfg-label"> </span>
-          <el-input v-model="configForm.docparse.tools.python" size="small" placeholder="python" />
-          <el-input v-model="configForm.docparse.tools.pdftotext" size="small" placeholder="pdftotext" />
-        </div>
-
         <div class="cfg-group">进程守护与自启</div>
         <div class="cfg-row">
           <span class="cfg-label">引擎</span>
@@ -502,7 +512,7 @@ onMounted(loadGlobalCapabilities)
         <el-button size="small" @click="copyMcp">复制端点</el-button>
       </div>
       <div class="ws-dim" style="margin-top: 10px; font-size: 12.5px; line-height: 1.7">
-        智能体可通过它读今日看板/课表/待办/早报/余额，也能写计划与笔记、勾待办、生成 AI 总结。
+        智能体可通过它读今日看板 / 词单 / 做题本 / 知识库 / 余额，也能写计划与笔记、灌题、生成总结。
         接入方式见项目根目录 README 的「MCP 接入」一节。
       </div>
     </div>
@@ -518,11 +528,57 @@ onMounted(loadGlobalCapabilities)
         </el-radio-group>
         <span class="ws-dim">当前实际：{{ ui.resolvedTheme === 'dark' ? '深色' : '浅色' }}</span>
       </div>
+
+      <!-- 暗色时段：只在「按时间自动」时才有意义 -->
+      <div v-if="ui.theme === 'auto'" class="block__row">
+        <span class="block__label">暗色时段</span>
+        <el-time-select v-model="darkFrom" start="00:00" step="00:30" end="23:30" size="small" style="width: 108px" />
+        <span class="ws-dim">到次日</span>
+        <el-time-select v-model="darkTo" start="00:00" step="00:30" end="23:30" size="small" style="width: 108px" />
+        <span class="ws-dim">{{ ui.timeDark ? '此刻按时间算：暗色' : '此刻按时间算：亮色' }}</span>
+        <el-button size="small" text @click="ui.resetThemeWindow()">恢复默认</el-button>
+      </div>
+      <div v-if="ui.theme === 'system'" class="block__row">
+        <span class="block__label" />
+        <span class="ws-dim">系统当前偏好：{{ ui.systemDark ? '深色' : '浅色' }}（在操作系统的显示设置里改）</span>
+      </div>
+
+      <!-- 侧边栏置顶：左栏行尾那颗图钉是日常入口，这里给一份推荐，省得一页页去点。
+           图钉只出现在没有展开箭头的行上（带子页面的入口行不给，见 core/leaf-pages.ts）。 -->
+      <div class="block__row">
+        <span class="block__label">侧边栏置顶</span>
+        <span class="ws-dim">
+          {{ ui.pinnedPages.length ? `已置顶 ${ui.pinnedPages.length} 页` : '尚未置顶' }} · 推荐：{{
+            recommendedNames
+          }}
+        </span>
+        <el-button size="small" text @click="useRecommendedPins">用推荐置顶</el-button>
+        <el-button v-if="ui.pinnedPages.length" size="small" text @click="ui.clearPins()">清空</el-button>
+      </div>
     </div>
 
     <div class="ws-card block">
       <div class="block__title">已注册功能</div>
-      <el-table :data="modules" style="width: 100%" size="small">
+      <!-- 手机档换卡片：4 列合计最小 400px，在 362px 的可用宽里要左右拖才能看到「入口」 -->
+      <div v-if="ui.isMobile" class="ws-cards">
+        <div v-for="m in modules" :key="m.id" class="ws-cards__item">
+          <div class="ws-cards__head">
+            <div class="ws-cards__title">{{ m.name }}</div>
+          </div>
+          <div class="ws-cards__sub">{{ m.description }}</div>
+          <div class="ws-cards__fields">
+            <span class="ws-cards__field">
+              <span class="ws-cards__field-k">id</span>
+              <span class="ws-cards__field-v ws-mono">{{ m.id }}</span>
+            </span>
+            <span class="ws-cards__field">
+              <span class="ws-cards__field-k">入口</span>
+              <span class="ws-cards__field-v ws-mono">{{ m.homePath }}</span>
+            </span>
+          </div>
+        </div>
+      </div>
+      <el-table v-else :data="modules" style="width: 100%" size="small">
         <el-table-column prop="id" label="id" width="130">
           <template #default="{ row }"><code class="ws-mono">{{ row.id }}</code></template>
         </el-table-column>
@@ -552,7 +608,19 @@ onMounted(loadGlobalCapabilities)
         <el-button type="danger" plain :disabled="!keys.length" @click="clearAll">清空全部</el-button>
       </div>
 
-      <el-table v-if="keys.length" :data="keys.map((k) => ({ key: k, preview: previewOf(k) }))" style="width: 100%; margin-top: 14px" size="small">
+      <!-- 手机档换卡片：键名那一列单是 300px，加上预览与删除按钮必然要左右拖 -->
+      <div v-if="keys.length && ui.isMobile" class="ws-cards" style="margin-top: 14px">
+        <div v-for="k in keys" :key="k" class="ws-cards__item">
+          <div class="ws-cards__head">
+            <div class="ws-cards__title ws-mono">{{ k }}</div>
+          </div>
+          <div class="ws-cards__sub">{{ previewOf(k) }}</div>
+          <div class="ws-cards__act">
+            <el-button link type="danger" size="small" @click="clearKey(k)">删除</el-button>
+          </div>
+        </div>
+      </div>
+      <el-table v-else-if="keys.length" :data="keys.map((k) => ({ key: k, preview: previewOf(k) }))" style="width: 100%; margin-top: 14px" size="small">
         <el-table-column prop="key" label="键（均为 workstation.* 命名空间）" width="300">
           <template #default="{ row }"><code class="ws-mono">{{ row.key }}</code></template>
         </el-table-column>

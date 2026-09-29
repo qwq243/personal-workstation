@@ -215,5 +215,29 @@
     ]
   },
   "// dataDir": "数据目录（看板、词单、向量、上传的录音…）。不写这一项 = 用仓库内的 server/data（默认）；写空串不等于默认（空串会让相对路径落到进程 cwd），要挪盘就填绝对路径",
-  "// ↓ 新配置写在这里": "本文件是模板（程序不读它）。加新项时同步三处：server/config.mjs 的 DEFAULTS、server/lib/config-editable.mjs 的白名单、以及这里。路径一律写正斜杠。"
+  "// ↓ 新配置写在这里": "本文件是模板（程序不读它）。加新项时同步三处：server/config.mjs 的 DEFAULTS、server/lib/config-editable.mjs 的白名单、以及这里。路径一律写正斜杠。",
+  "// collector": "资讯采集器的产物目录（out/latest.json 等）。留空则该模块不显示；字段契约见 docs/news-contract.md",
+  "collector": {
+    "dir": "",
+    "proxy": ""
+  },
+  "// news": "「与我相关」的关键词（命中即归 focus 分类）；留空则只认采集器标的分类",
+  "news": {
+    "focusKeywords": []
+  },
+  "// zuotiben": "做题本题库池：三样都填才可用；题干/解析自己按 docs/zuotiben-import.md 备，不随仓库分发",
+  "zuotiben": {
+    "pool": {
+      "dir": "",
+      "problems": "",
+      "solutions": ""
+    }
+  },
+  "// tts": "朗读（edge-tts）：dir 指到带 say.py 与 .venv 的目录；留空则该功能回落浏览器朗读",
+  "tts": {
+    "dir": "",
+    "voice": "en-US-AriaNeural",
+    "voiceZh": "zh-CN-XiaoxiaoNeural",
+    "rate": "+0%"
+  }
 }
