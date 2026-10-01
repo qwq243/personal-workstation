@@ -39,6 +39,11 @@ import * as memo from './lib/memo.mjs'
 import * as hotwords from './lib/hotwords.mjs'
 import * as newsfeed from './lib/newsfeed.mjs'
 import * as newsBoard from './lib/news-board.mjs'
+import * as newsAi from './lib/news-ai.mjs'
+import * as workbuddy from './lib/workbuddy.mjs'
+import * as wbops from './lib/workbuddy-ops.mjs'
+import * as wbActivity from './lib/workbuddy-activity.mjs'
+import * as wbRemote from './lib/workbuddy-remote.mjs'
 import * as zuotiben from './lib/zuotiben.mjs'
 import * as zuotibenExport from './lib/zuotiben-export.mjs'
 import * as zuotibenSuggest from './lib/zuotiben-suggest.mjs'
@@ -1057,6 +1062,201 @@ route('GET', /^\/api\/news\/timeline$/, (req, { query }) => newsfeed.timeline(St
 route('GET', /^\/api\/news\/case$/, (req, { query }) => newsfeed.caseFile(String(query.id ?? '')))
 route('GET', /^\/api\/news\/reports$/, (req, { query }) => newsfeed.reports(Number(query.limit) || 20))
 route('GET', /^\/api\/news\/report$/, (req, { query }) => newsfeed.report(String(query.file ?? '')))
+/**
+ * AI 概括这一轮的状态（几百字节）：`{ at, due, running, lastCount, model, lastError, lastErrorAt }`。
+ * 页面用它决定「要不要再等一会儿」—— 出卡是懒的，不盯就永远看到上一轮的结果。
+ */
+route('GET', /^\/api\/news\/ai-status$/, () => ({ ok: true, ...newsAi.status() }))
+
+/* --------------------------------------------------------------- 号池 ---
+ * 客户端是第三方开源网关 **WorkBuddy2API**（把上游账号包成 OpenAI 兼容 API）。
+ * 网关**不随本仓库分发**：自己装一份，目录填进 `config.workbuddy.dir`（没配 = 模块隐藏）。
+ * 边车只做转发与缓存；账号轮转、积分记账、排程定时都在网关那一侧。
+ */
+
+/**
+ * 额度总览：账号池状态 + 网关调用统计 + 真实积分包。
+ *
+ * 三块拼一份快照。前两块是网关内存数据（毫秒级），第三块要出上游查（约 1.6s），
+ * 所以积分走后台定时缓存、页面永远先画缓存。?refresh=1 = 手动刷新，同步等一轮。
+ */
+route('GET', /^\/api\/workbuddy\/snapshot$/, (req, { query }) =>
+  workbuddy.snapshot({ force: query.refresh === '1', host: query.host }),
+)
+/** 跨池矩阵：每台号池的账号 + 跨池重复的 uid（页面据此提示「同一个号别放两个池」） */
+route('GET', /^\/api\/workbuddy\/matrix$/, () => workbuddy.matrix())
+/** 多台号池汇到一起；单台失败只标那一台 */
+route('GET', /^\/api\/workbuddy\/merged$/, (req, { query }) =>
+  timed('workbuddy.merged', () => workbuddy.merged({ force: query.refresh === '1' })),
+)
+/** 号池主机清单：本机 + config.workbuddy.hosts[] 里的远端主机，页面用它画主机切换 */
+route('GET', /^\/api\/workbuddy\/hosts$/, () => ({
+  ok: true,
+  items: workbuddy.hosts().map((h) => ({
+    id: h.id,
+    name: h.name,
+    kind: h.kind,
+    baseUrl: h.baseUrl,
+    note: h.note,
+    // 远端主机没配 key 时页面要能提示，而不是让人对着 401 猜
+    keyConfigured: h.kind === 'local' ? true : workbuddy.hasKey(h),
+  })),
+}))
+/** 账号池状态（网关内存，不出网） */
+route('GET', /^\/api\/workbuddy\/status$/, (req, { query }) => workbuddy.status(query.host))
+/** 网关调用统计：按天落盘，?day=YYYY-MM-DD 回看某一天，缺省今天 */
+route('GET', /^\/api\/workbuddy\/stats$/, (req, { query }) => workbuddy.stats(query.day ?? '', query.host))
+/** 真实积分包。默认现查（约 1.6s）；带 ?refresh=1 走缓存刷新 */
+route('GET', /^\/api\/workbuddy\/credits$/, (req, { query }) =>
+  query.refresh === '1'
+    ? workbuddy.refreshCredit({ force: true, wait: true, host: query.host })
+    : workbuddy.credits(query.host),
+)
+/** 网关是否在跑（页面据此给启动指引，而不是显示一堆空数据） */
+route('GET', /^\/api\/workbuddy\/health$/, (req, { query }) => workbuddy.reachable(query.host))
+
+/**
+ * 连接凭据：Base URL + API key 掩码，给额度页「怎么用」那张表用。
+ * 默认**不下发明文**；带 ?reveal=1 才给 —— 页面点「显示」或「复制」时才请求，
+ * 明文不随页面加载一起进前端内存。
+ */
+route('GET', /^\/api\/workbuddy\/credential$/, (req, { query }) =>
+  workbuddy.credential({ reveal: query.reveal === '1', host: query.host }),
+)
+
+/**
+ * 支持的模型清单（含积分倍率、上下文、是否支持图片/推理）。
+ * 走内存 + 落盘缓存（默认 10 分钟），页面打开不额外打网关；?refresh=1 强制重拉。
+ */
+route('GET', /^\/api\/workbuddy\/models$/, async (req, { query }) => {
+  if (query.refresh === '1') {
+    const r = await workbuddy.fetchModels(query.host)
+    if (r.ok) return { ok: true, items: r.items, at: Date.now(), stale: false }
+    return { ok: false, error: r.error }
+  }
+  return workbuddy.models(query.host)
+})
+
+/**
+ * 请求日志：读网关自己写的日志文件（定宽表格，逐行解析）。
+ * 注意那个文件被启动脚本**每次启动覆盖** —— 它只覆盖网关「本次运行」，
+ * 序号也从 #001 重新开始，界面里要如实标出来。
+ */
+route('GET', /^\/api\/workbuddy\/logs$/, (req, { query }) =>
+  workbuddy.logs({
+    limit: Number(query.limit || 200),
+    keyword: query.keyword ?? '',
+    onlyFail: query.onlyFail === '1',
+    host: query.host,
+  }),
+)
+
+/* --- 网关进程控制（启停 / 独立自启位） --- */
+
+/** 网关进程状态：在不在跑、PID、健康、自启位现状 */
+route('GET', /^\/api\/workbuddy\/service$/, () => workbuddy.service())
+/** 启动网关（调网关自带的启动脚本，脚本名在 config.workbuddy.startCmd） */
+route('POST', /^\/api\/workbuddy\/start$/, () => workbuddy.startService())
+/** 停止网关 */
+route('POST', /^\/api\/workbuddy\/stop$/, () => workbuddy.stopService())
+/** 网关自己的开机自启位（默认走「随面板启动」，这个给「只跑网关不开面板」用） */
+route('POST', /^\/api\/workbuddy\/autostart$/, (req, { body }) =>
+  workbuddy.setAutostart(body?.enabled === true),
+)
+
+/* --- 号池运维（账号池 / 活动任务 / 网页登录 / 配置 / 测聊） ---
+   实现在 lib/workbuddy-ops.mjs 与 lib/workbuddy-activity.mjs。这一段的接口都会改文件 /
+   出网 / 重启进程，所以只由用户显式点击触发，没有任何后台自动调用。 */
+
+/** 账号池合并视图：网关池状态 × 凭证文件（有效期、区域）× 积分缓存 */
+route('GET', /^\/api\/workbuddy\/accounts$/, () => wbops.accounts())
+/** 单账号运维：停用 / 启用 / 复活（需网关 config 的 admin.enabled=true，否则返回提示） */
+route('POST', /^\/api\/workbuddy\/account\/admin$/, (req, { body }) =>
+  wbops.accountAdmin(String(body?.uid ?? ''), String(body?.op ?? '')),
+)
+/** 手动导入凭证（粘贴 JSON，兼容嵌套式 / 扁平式 / 网关自带登录命令的输出三种形态） */
+route('POST', /^\/api\/workbuddy\/account\/import$/, (req, { body }) => wbops.importAccount(body?.text))
+/** 删除账号凭证文件（必须带 confirm=<uid> 才动手） */
+route('DELETE', /^\/api\/workbuddy\/account\/([\w.-]+)$/, (req, { params, query }) =>
+  wbops.deleteAccount(params[0], query.confirm ?? ''),
+)
+
+/**
+ * 立即执行一个任务：checkin 签到 · activity 活跃上报 · travel 旅行 · keepalive 保活 ·
+ * school 开学季脚本 · cat 夜猫子脚本 · trial 领加油包 · credits 查积分（后两个是额外动作），
+ * 以及 **all = 一键完成**（六类串行 + 步间等待 + 命中限流即停，见 workbuddy-activity.mjs）。
+ * 会发积分的任务跑前后各查一次积分，用来算逐账号增量（多花两次查询的时间）。
+ */
+route(
+  'POST',
+  /^\/api\/workbuddy\/tasks\/(all|checkin|activity|travel|keepalive|school|cat|trial|credits)$/,
+  (req, { params, body, query }) =>
+    // 远端主机：经 SSH 在那台机器上跑它自己的任务脚本（任务名白名单，不拼输入）
+    query.host && query.host !== 'local'
+      ? wbRemote.startRemoteTask(String(query.host), params[0])
+      : wbActivity.startRun(params[0], {
+          uidPrefix: String(body?.uidPrefix ?? ''),
+          force: body?.force === true,
+        }),
+)
+route('GET', /^\/api\/workbuddy\/tasks$/, (req, { query }) =>
+  query.host && query.host !== 'local'
+    ? wbRemote.remoteRuns(String(query.host), { limit: Number(query.limit || 20) })
+    : wbActivity.runsList({ limit: Number(query.limit || 20) }),
+)
+route('GET', /^\/api\/workbuddy\/tasks\/([\w.-]+)$/, (req, { params, query }) =>
+  query.host && query.host !== 'local'
+    ? wbRemote.remoteRunGet(params[0])
+    : wbActivity.runGet(params[0]),
+)
+
+/**
+ * 活动管理：六类排程任务的开关 + 下次触发 + 最近一次结果。
+ * POST 的 body 形如 { patch: { checkin_enabled: true, school_hours: [12, 18] }, restart: true }；
+ * 改完必须重启网关才生效（schedule 只在启动时读一次），所以默认顺手重启。
+ */
+route('GET', /^\/api\/workbuddy\/schedule$/, (req, { query }) =>
+  query.host && query.host !== 'local'
+    ? wbRemote.remoteSchedule(String(query.host), { force: query.refresh === '1' })
+    : wbActivity.schedule(),
+)
+route('POST', /^\/api\/workbuddy\/schedule$/, (req, { body }) =>
+  wbActivity.saveSchedule(body?.patch, { restart: body?.restart !== false }),
+)
+
+/**
+ * 活动日志：本页手动跑的任务 + 网关自己排程跑的任务，合流后按时间倒序。
+ * 网关那部分从网关的 stderr 日志解析（按事件 id 去重 + 落盘），边车重启不丢。
+ */
+route('GET', /^\/api\/workbuddy\/activity$/, (req, { query }) =>
+  wbActivity.activityLog({
+    limit: Number(query.limit || 100),
+    task: String(query.task ?? ''),
+    onlyCredit: query.onlyCredit === '1',
+    day: String(query.day ?? ''),
+  }),
+)
+
+/** 网页登录：start 拿授权链接，poll 查一次结果（成功即落盘网关的 auths/ 目录） */
+route('POST', /^\/api\/workbuddy\/login\/start$/, (req, { body }) =>
+  wbops.loginStart(body?.realm === 'global' ? 'global' : 'cn'),
+)
+route('POST', /^\/api\/workbuddy\/login\/poll$/, (req, { body }) =>
+  wbops.loginPoll(body?.realm === 'global' ? 'global' : 'cn'),
+)
+
+/** 网关配置：读 / 存（首次保存前自动留一份 .ws.bak）/ 从备份恢复 */
+route('GET', /^\/api\/workbuddy\/config$/, () => wbops.configGet())
+route('PUT', /^\/api\/workbuddy\/config$/, (req, { body }) => wbops.configSave(body?.doc))
+route('POST', /^\/api\/workbuddy\/config\/restore$/, () => wbops.configRestore())
+
+/** 重启网关（改配置 / 加删账号后生效） */
+route('POST', /^\/api\/workbuddy\/restart$/, () => wbops.restartGateway())
+
+/** 测聊：默认流式（SSE 逐帧转发），body.stream=false 时一次性返回 */
+route('POST', /^\/api\/workbuddy\/chat$/, (req, { body, res }) =>
+  body?.stream === false ? wbops.chat(body) : wbops.chatStream(body, res),
+)
 
 /* -------------------------------------------------------------- 做题本 ---
  * 数据在 server/data/zuotiben.json，前端与智能体读写同一份。
@@ -1458,6 +1658,12 @@ async function startServer() {
     // 模型用量页/打开即秒显缓存，不再每次现拉 NewAPI。
     usageCache.startSync()
     console.log(` 模型用量: 缓存同步已启动（轻 ${usageCache.LIVE_SEC}s / 全量 ${usageCache.FULL_SEC}s，环境变量 USAGE_LIVE_SEC/USAGE_FULL_SEC 可调）`)
+
+    // 号池额度：读落盘缓存 → 立即补一轮积分 → 按周期后台同步（默认 300s）。
+    // 积分查询要出上游约 1.6s，所以只走这个定时器，不跟着页面刷新走。
+    // 没配网关目录时它会安静地跳过（页面也会显示「还没配」）。
+    workbuddy.startScheduler()
+    console.log(` 号池: 额度缓存同步已启动（每 ${workbuddy.CREDIT_SEC}s，环境变量 WB_CREDIT_SEC 可调）`)
 
     // overview 预热：启动 2s 后后台构建一次（结果落盘）。
     // 这样「双击启动 → 打开页面」时首屏直接命中缓存，看板秒开。

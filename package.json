@@ -1,6 +1,6 @@
 {
   "name": "workstation-oss",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "个人工作站（开源副本）—— 可扩展的多功能学习 / 效率台",
@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:pages && vite build",
+    "build": "npm run check:pages && npm run check:styles && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "server": "node server/index.mjs",
@@ -23,6 +23,7 @@
     "autostart:on": "node scripts/panel-autostart.mjs enable",
     "autostart:off": "node scripts/panel-autostart.mjs disable",
     "check:pages": "node scripts/check-page-width.mjs",
+    "check:styles": "node scripts/check-styles.cjs",
     "check:nav": "node scripts/check-nav.cjs",
     "check:nav:shots": "node scripts/check-nav.cjs --shots",
     "check:mobile": "node scripts/check-mobile.cjs",

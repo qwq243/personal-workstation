@@ -328,6 +328,26 @@ readJSONFile(credentials.json) ─┴─► merge(DEFAULTS, fileCfg) ─► appl
 **一次朗读上限 800 字**：它只服务「读一句话」，别当开放 TTS 代理用。
 这一节**不在 §4 的 PATCH 白名单里** —— 要改就编辑 `server/config.json`。
 
+### 3.13 号池 `workbuddy`
+
+「号池」页（`#/office/workbuddy`）是第三方网关 **WorkBuddy2API** 的客户端。那个网关把上游账号
+包成 OpenAI 兼容 API，账号轮转、熔断冷却、积分记账、排程定时都在它那一侧；**网关不随本仓库分发**，
+自己装一份（MIT，见 README「可选件」），再把目录填进来。`dir` 留空 → 整个模块从侧边栏隐藏。
+
+| 字段 | 默认 | 含义 | 留空会怎样 |
+|---|---|---|---|
+| `workbuddy.dir` | `''` | 网关根目录（绝对路径） | **没配 = 模块不显示**；边车也不会去启停网关 |
+| `workbuddy.baseUrl` | `'http://127.0.0.1:7863'` | 网关监听地址 | 用默认值（网关自己的默认端口） |
+| `workbuddy.label` | `'本机'` | 本机那一池在页面上的名字 | 显示「本机」 |
+| `workbuddy.autoStart` | `true` | 面板启动时顺带把网关拉起来 | `false` = 只读额度，不碰网关进程 |
+| `workbuddy.startCmd` / `stopCmd` | `''` | 网关自己的启停脚本（相对 `dir`） | 空 = 「启动 / 停止」按钮报「没配脚本」 |
+| `workbuddy.python` | `''` | 网关那两个 python 活动脚本用的解释器 | 空 → 环境变量 `WB2A_PYTHON` → PATH 里的 `python` |
+| `workbuddy.autostartVbs` | `'WorkBuddy2API.vbs'` | 网关在启动文件夹里的自启项文件名 | 用默认名（「网关配置」页读它做自启开关） |
+| `workbuddy.hosts` | `[]` | 远端号池（本机之外）：`{ id, name, baseUrl, note }`；要跨机做事再加 `{ ssh, creditScript, runScript, scheduleScript }` | 空 = 只有本机那一池。三个脚本路径留空 = 该主机只读额度，不支持「触发任务 / 读远端排程」 |
+
+**api_key 不在这里配** —— 读网关自己 `config.json` 里那份，保持单一来源（远端的 key 走
+`credentials.json` 的 `llm.keys['workbuddy-<id>']`）。本节在 §4 的 PATCH 白名单里。
+
 ---
 
 ## 4. 页面上能改什么（白名单）

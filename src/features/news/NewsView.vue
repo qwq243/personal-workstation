@@ -18,9 +18,10 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import SidecarOffline from '@/components/SidecarOffline.vue'
 import { api, ensureSidecar } from '@/core/sidecar'
+import { usePolling } from '@/core/polling'
 import { useUiStore } from '@/core/ui'
 import NewsCard from './NewsCard.vue'
-import { ChsiIcon, XIcon, LinuxDoIcon, V2exIcon, HnIcon, GithubIcon, SspaiIcon, WeixinIcon, RssIcon } from './sourceIcons'
+import { ChsiIcon, XIcon, LinuxDoIcon, V2exIcon, HnIcon, GithubIcon, SspaiIcon, WeixinIcon, BiliIcon, RssIcon } from './sourceIcons'
 
 const ui = useUiStore()
 const ready = ref(false)
@@ -75,6 +76,41 @@ async function load(force = false) {
   batches.value = (b.data as any)?.list ?? []
   tlIndex.value = (t.data as any)?.list ?? []
   loading.value = false
+  watchAiBatch()
+}
+
+/* ------------------------------------------------- 等这一轮 AI 概括 --- */
+
+/**
+ * 出卡是**懒的**：打开页面时如果到点了，边车才在后台跑一轮（20–60 秒）。
+ * 不盯着的话，看到的永远是上一轮的结果 —— 观感就是「资讯不更新」。
+ *
+ * 所以：到点 / 正在跑的时候，每 12 秒问一次那个几百字节的小状态接口，
+ * 看到新批落了盘（`at` 变了且不在跑了）就整页重载一次；
+ * 最多盯 5 分钟（25 次），失败就不管了 —— 页面不许因为一个后台任务转圈不停。
+ */
+let aiBeforeAt = 0
+let aiTries = 0
+const aiPoll = usePolling(async () => {
+  if (++aiTries > 25) {
+    aiPoll.stop()
+    return
+  }
+  const r = await api.newsAiStatus()
+  if (!r.ok) return
+  const s = (r.data ?? {}) as any
+  if (!s.running && Number(s.at || 0) > aiBeforeAt) {
+    aiPoll.stop()
+    await load(true)
+  }
+}, 12_000)
+
+function watchAiBatch() {
+  const st = (board.value?.ai?.status ?? {}) as any
+  aiBeforeAt = Number(st.at || 0)
+  aiTries = 0
+  if (st.due || st.running) aiPoll.start()
+  else aiPoll.stop()
 }
 
 /** 「现在概括」：立刻把这一批变成 AI 事件卡（会等它跑完） */
@@ -126,8 +162,12 @@ const SOURCE_ICON: Record<string, any> = {
   'wx-jiqizhixin': WeixinIcon,
   'wx-qbitai': WeixinIcon,
   'wx-paperweekly': WeixinIcon,
+  // B 站视频渠道：整个平台挂一枚图标（键是平台名，不是某一个账号）
+  bili: BiliIcon,
 }
-const sourceIcon = (id: string) => SOURCE_ICON[id] ?? RssIcon
+/** 先精确匹配源 id，再按平台前缀兜底（`bili-xxx` 这类「一个平台挂多个账号」的源） */
+const sourceIcon = (id: string) =>
+  SOURCE_ICON[id] ?? SOURCE_ICON[String(id).split('-')[0]] ?? RssIcon
 
 /* ------------------------------------------------------------ 视图 --- */
 
@@ -278,6 +318,16 @@ function sourceIdOf(name: string) {
 
 /** 页签上的计数：与我相关 = focus + kaoyan */
 const mineCount = computed(() => (board.value?.ai?.cards ?? []).filter((c: any) => tabOf(c.cat) === 'mine').length)
+
+/**
+ * 上一轮概括是不是挂了：失败时间**晚于**最近一次成功出批的时间才提示。
+ * （只要后来成功过一次，`at` 就会跑到 `lastErrorAt` 后面，这条提示自动消失。）
+ */
+const aiFailed = computed(() => {
+  const st = board.value?.ai?.status
+  if (!st?.lastError) return false
+  return Number(st.lastErrorAt || 0) > Number(st.at || 0)
+})
 
 /* ------------------------------------------------------- 反馈/采纳 --- */
 
@@ -455,6 +505,12 @@ onBeforeUnmount(() => pauseCarousel())
           </span>
           <span v-if="brief && !board.ai?.batchSummary" class="nw__hero-src">来自采集器简报</span>
         </header>
+        <!-- 上一轮概括全挂了（上游偶发 504）就说清楚：不是没新东西，是没跑成 ——
+             不说的话页面只会「保持上一批」，看起来永远像「资讯没更新」 -->
+        <p v-if="aiFailed" class="nw__hero-fail">
+          上一轮概括没跑成（{{ board.ai.status.lastError }}）·
+          <button class="nw__hero-retry" :disabled="digesting" @click="digestNow">现在概括</button>
+        </p>
         <ol v-if="bulletLinks.length" class="nw__hero-list">
           <li v-for="(b, i) in bulletLinks" :key="i" :class="{ 'is-clickable': b.key }" @click="b.key && jumpToCard(b.key)">
             {{ b.text }}
@@ -544,7 +600,12 @@ onBeforeUnmount(() => pauseCarousel())
 
         <div class="nw__cards" :class="{ 'nw__cards--compact': density === 'compact' }">
           <NewsCard :id="`card-${c.key}`" v-for="c in cards" :key="c.key" :card="c" @changed="load(true)" @tag="tagFilter = $event" />
-          <div v-if="!cards.length" class="nw__dim nw__empty">这一类现在没有内容</div>
+          <div v-if="!cards.length" class="nw__dim nw__empty">
+            这一类现在没有内容
+            <!-- 默认那一栏是「与我相关」，而新一批常常全是 AI/科技 —— 不点一下别的栏，
+                 会以为整页没更新。给个一步切换的出口。 -->
+            <button v-if="view !== 'all'" class="nw__empty-jump" @click="view = 'all'">看全部 ›</button>
+          </div>
         </div>
       </section>
 
@@ -692,6 +753,25 @@ onBeforeUnmount(() => pauseCarousel())
   border: 1px solid var(--ws-border);
   border-radius: var(--ws-radius-pill);
   padding: 0 8px;
+}
+/* 「上一轮没跑成」那行提示：低调的红，别抢 AI 大总结的注意力 */
+.nw__hero-fail {
+  margin: 6px 0 0;
+  font-size: var(--ws-fs-xs);
+  color: var(--ws-danger, #c0392b);
+}
+.nw__hero-retry {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--ws-accent, #3b6ef5);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.nw__hero-retry:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .nw__hero-list {
   margin: 0;
@@ -1041,6 +1121,19 @@ onBeforeUnmount(() => pauseCarousel())
 .nw__empty {
   padding: var(--ws-space-6) 0;
   text-align: center;
+}
+/* 空态里的「看全部 ›」：跟着正文的灰，不要做成大按钮抢走这一块的注意力 */
+.nw__empty-jump {
+  margin-left: 8px;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--ws-accent, #3b6ef5);
+  cursor: pointer;
+}
+.nw__empty-jump:hover {
+  text-decoration: underline;
 }
 
 /* 通用面板（调教记录 / 后台） */

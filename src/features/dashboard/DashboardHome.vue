@@ -356,7 +356,7 @@ onMounted(init)
             <span>本周一览</span>
             <span class="block__actions">
               <span class="ws-dim" style="font-size: 12px">点一格 = 看那天</span>
-              <el-button size="small" link @click="router.push('/calendar')">打开日历 ›</el-button>
+              <el-button size="small" link @click="router.push('/office/calendar')">打开日历 ›</el-button>
             </span>
           </div>
           <div class="week__row">
@@ -604,6 +604,9 @@ onMounted(init)
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* 标题绝不参与压缩：flex 子项默认会被压到内容宽度以下，「AI 总结 · 今天的建议」这类
+     长标题在窄卡上会被右侧那组挤成一列竖排。挤不下就让 `.block__actions` 整行换下去。 */
+  flex: none;
 }
 .block__actions {
   display: inline-flex;

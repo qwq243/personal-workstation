@@ -17,6 +17,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import MdLite from '@/components/MdLite.vue'
 import MemoAudioPlayer from './MemoAudioPlayer.vue'
 import { api, ensureSidecar, memoSummarizeStream } from '@/core/sidecar'
+import { copyText } from '@/core/clipboard'
 import AiThoughts from '@/ai/AiThoughts.vue'
 import { adaptMemoEvent, applyEvent } from '@/ai/adapt'
 import { makeMessage, type AiMessage } from '@/ai/model'
@@ -261,15 +262,6 @@ async function fetchDoc(rec: any): Promise<{ filename: string; content: string }
     return null
   }
   return { filename: d.filename ?? `${rec.title || 'memo'}.md`, content: String(d.content ?? '') }
-}
-
-async function copyText(text: string, okText: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success(okText)
-  } catch {
-    ElMessage.warning('复制失败（浏览器不给剪贴板权限），可以手动选中')
-  }
 }
 
 async function copyDoc() {

@@ -184,7 +184,7 @@ export const DEFAULTS = {
   /**
    * 资讯采集器的产物目录（「资讯」页只读它；采集本身不在这里做）。
    *
-   * 采集器是独立进程 —— 本机计划任务、云机器 cron、或者就用 `scripts/collector-skeleton.mjs`
+   * 采集器是独立进程 —— 本机计划任务、另一台机器上的 cron、或者就用 `scripts/collector-skeleton.mjs`
    * 这个最小示例。边车只读它下面的 `out/latest.json`、`out/*.md`、`timeline/*.md`、
    * `cases/*.md`、`sources.json` 这几样，字段契约见 docs/news-contract.md。
    * dir 留空 = 没配：资讯模块从侧边栏隐藏（「没配 = 不显示」）。
@@ -211,6 +211,44 @@ export const DEFAULTS = {
    */
   zuotiben: {
     pool: { dir: '', problems: '', solutions: '' },
+  },
+
+  /**
+   * 号池（WorkBuddy）—— 客户端是第三方开源网关 **WorkBuddy2API**：把上游账号包成
+   * OpenAI 兼容 API，账号轮转、熔断冷却、积分与调用统计都在网关那一侧。
+   *
+   * **网关不随本仓库分发**：自己装一份（MIT，见 README 的「外部依赖」一节），把目录填进
+   * `dir`、监听地址填进 `baseUrl`。`dir` 留空 = 没配 —— 号池模块从侧边栏隐藏。
+   *
+   * api_key 不在这里配：读网关自己 `config.json` 里那份，保持单一来源。
+   */
+  workbuddy: {
+    /** 网关根目录（绝对路径）；留空 = 没配 */
+    dir: '',
+    /** 网关监听地址（网关默认 127.0.0.1:7863） */
+    baseUrl: 'http://127.0.0.1:7863',
+    /** 本机那一池在页面上显示的名字 */
+    label: '本机',
+    /** 面板启动时顺带把网关拉起来（网关是独立进程，不开就没有额度数据） */
+    autoStart: true,
+    /** 网关自己的启动 / 停止脚本（相对 dir。Windows 上是 .cmd，别的系统填自己的） */
+    startCmd: '',
+    stopCmd: '',
+    /**
+     * 活动/用量那条线用的 python 解释器（网关自带两个 python 活动脚本）。
+     * 空值走环境变量 WB2A_PYTHON，再兜底 PATH 里的 python。
+     */
+    python: '',
+    /** 网关在启动文件夹里的自启项文件名（「网关配置」页读它做自启开关） */
+    autostartVbs: 'WorkBuddy2API.vbs',
+    /**
+     * 号池可以有多台机器（本机 + 远端）。每条：
+     *   { id, name, baseUrl, note, keyName }
+     * 另外三项是「要跨机做事」时才需要 —— 走 SSH 到那台机器上跑它自己的脚本：
+     *   { ssh, creditScript, runScript, scheduleScript }
+     * 留空 = 该主机只读额度、不支持那些动作（页面会给出提示）。
+     */
+    hosts: [],
   },
 
   /**

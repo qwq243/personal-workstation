@@ -276,6 +276,39 @@ load()
 </template>
 
 <style scoped>
+/* 卡片自带一份头部 / 提示样式。
+   `.block`（根元素）能吃到页面那份 scoped 规则 —— 子组件的根节点会带上父组件的 scope 标记；
+   但里面的 `.block__head` / `.block__title` / `.muted-line` **吃不到**（子组件内部节点没有父 scope 标记），
+   而它们只在看板 / 每日一句两页的 scoped 样式里定义过 ⇒ 那两页上标题是 400 字重、头部也不是 flex。
+   写法与那两页保持一致，改这里别只改一边。 */
+.block__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  /* 看板上这张卡只占一列（400px 上下），一处放不下就**整行**换下去 ——
+     不许把「已完成 5/105 · 连续 2 天」挤成两行（换行后右侧那组拿到整行宽度）。 */
+  flex-wrap: wrap;
+  row-gap: 8px;
+  margin-bottom: 12px;
+}
+.block__head > .ws-row {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+.block__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none; /* 标题绝不参与压缩：手机上会被右侧操作挤成竖排 */
+  font-size: 14px;
+  font-weight: 650;
+}
+.muted-line {
+  color: var(--ws-text-3);
+  font-size: 13px;
+  padding: 6px 0;
+}
 .ed-head {
   display: flex;
   align-items: center;

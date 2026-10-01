@@ -23,6 +23,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api, wikiChatStream } from '@/core/sidecar'
+import { copyText } from '@/core/clipboard'
 import AiChat from '@/ai/AiChat.vue'
 import { adaptWikiEvent, applyEvent, markAborted } from '@/ai/adapt'
 import { makeMessage, type AiMessage } from '@/ai/model'
@@ -247,21 +248,7 @@ async function retryMsg(msg: AiMessage) {
 async function copyMsg(m: AiMessage) {
   const text = m.content ?? ''
   if (!text.trim()) return ElMessage.warning('这条没有正文可复制')
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制回答（markdown 原文）')
-  } catch {
-    // 剪贴板 API 不可用（非安全上下文/权限被拒）时的兜底
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.style.position = 'fixed'
-    ta.style.opacity = '0'
-    document.body.appendChild(ta)
-    ta.select()
-    document.execCommand('copy')
-    document.body.removeChild(ta)
-    ElMessage.success('已复制回答')
-  }
+  await copyText(text, '已复制回答（markdown 原文）')
 }
 
 function stop() {

@@ -3,6 +3,7 @@
  *
  * 现状（收口前）：
  *   知识库问答 —— 判别联合 `{type:'tool'|'delta'|'reasoning'|'done'|'error'|'end'}`
+ *   测聊       —— 扁平字段 `{delta?, reasoning?, usage?, done?, ttfbMs?, …}`（没有 type）
  *   语音随记   —— 九种 `{type:'start'|'stage'|'reasoning'|'tick'|'delta'|'learned'|'done'|'error'|'end'}`
  *
  * 三套形状本身没问题（各自贴合自己的服务端），问题是**每个页面各自写一遍 switch**，
@@ -10,11 +11,11 @@
  * 这里改成：**纯函数适配 + 一个共享 reducer**，页面只保留自己独有的收尾动作。
  *
  * 刻意**不**抹平的三处差异（抹了就是丢功能）：
- *   1. 中断语义：知识库 abort → 静默 end；随记 abort → 完全静默
- *   2. 收尾动作：知识库要刷新会话列表、随记要回读记录并在失败时降级非流式
- *   3. 起始事件：随记有 `start`（带分块数），知识库没有
+ *   1. 中断语义：知识库 abort → 静默 end；测聊 abort → 一条「已停止」；随记 abort → 完全静默
+ *   2. 收尾动作：知识库要刷新会话列表、随记要回读记录并在失败时降级非流式、测聊要空输出兜底
+ *   3. 起始事件：随记有 `start`（带分块数），另两页没有
  */
-import type { MemoSummaryEvent, WikiChatEvent } from '@/core/sidecar'
+import type { MemoSummaryEvent, WbChatEvent, WikiChatEvent } from '@/core/sidecar'
 import type { AiMessage, AiReference, AiStreamEvent, AiToolStep } from './model'
 
 /**
@@ -77,6 +78,27 @@ export function adaptWikiEvent(e: WikiChatEvent): AiStreamEvent[] {
     default:
       return []
   }
+}
+
+/* ------------------------------------------------------------------ 测聊 -- */
+
+export function adaptWbEvent(e: WbChatEvent): AiStreamEvent[] {
+  const out: AiStreamEvent[] = []
+  if (e.delta) out.push({ kind: 'delta', text: e.delta })
+  if (e.reasoning) out.push({ kind: 'reasoning', text: e.reasoning })
+  if (e.error) out.push({ kind: 'error', error: e.error, gatewayHint: e.gatewayHint })
+  if (e.ttfbMs !== undefined || e.elapsedMs !== undefined || e.usage || e.finishReason) {
+    out.push({
+      kind: 'metrics',
+      ttfbMs: e.ttfbMs,
+      elapsedMs: e.elapsedMs,
+      usage: e.usage,
+      finishReason: e.finishReason,
+    })
+  }
+  // 测聊的 done 是扁平字段里的一个布尔位，不带任何载荷
+  if (e.done && !out.some((x) => x.kind === 'error')) out.push({ kind: 'done' })
+  return out
 }
 
 /* -------------------------------------------------------------- 语音随记 -- */

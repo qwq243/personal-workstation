@@ -239,5 +239,17 @@
     "voice": "en-US-AriaNeural",
     "voiceZh": "zh-CN-XiaoxiaoNeural",
     "rate": "+0%"
+  },
+  "// workbuddy": "号池：客户端是第三方开源网关 WorkBuddy2API（不随本仓库分发，自己装一份）。dir 留空则该模块不显示；api_key 读网关自己 config.json 里那份，不在这里配",
+  "workbuddy": {
+    "dir": "",
+    "baseUrl": "http://127.0.0.1:7863",
+    "label": "本机",
+    "autoStart": true,
+    "startCmd": "",
+    "stopCmd": "",
+    "python": "",
+    "autostartVbs": "WorkBuddy2API.vbs",
+    "hosts": []
   }
 }

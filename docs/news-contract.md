@@ -190,7 +190,12 @@
 | `github-hot` | `GithubIcon` |
 | `sspai` | `SspaiIcon` |
 | `wx-*` | `WeixinIcon` |
+| `bili-*`（B 站这类视频渠道） | `BiliIcon` |
 | 别的（`world-*`、`tech-*`…） | 通用 `RssIcon`（有自己的图标就换） |
+
+查表是**先精确匹配源 id、再按平台前缀兜底**（`bili-某频道` 找不到 `bili-某频道` 这条就用 `bili` 这一条），
+所以「一个平台挂一批账号」的源只要在那个平台键上登记一次就够 —— `x-*` / `wx-*` / `linuxdo-*` 里的
+逐条登记是可选的（想让某个账号单独换一枚图标时才写）。
 
 ---
 

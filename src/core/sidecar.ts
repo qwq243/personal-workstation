@@ -140,6 +140,14 @@ async function call<T = any>(
   }
 }
 
+/** 拼账号池接口的查询串：`host` 只在远端主机时带上 */
+function wbQuery(path: string, q: Record<string, string> = {}) {
+  const u = new URLSearchParams()
+  for (const [k, v] of Object.entries(q)) if (v) u.set(k, v)
+  const qs = u.toString()
+  return qs ? `${path}?${qs}` : path
+}
+
 export const api = {
   health: () => call('/api/health', { timeout: 4000 }),
   overview: () => call('/api/overview', { timeout: 40000 }),
@@ -476,7 +484,7 @@ export const api = {
   wikiMineruTest: () => call('/api/wiki/mineru/test', { timeout: 60000 }),
 
   /* 资讯（`#/news`）：读采集器的产物目录（`collector.dir`，格式见 docs/news-contract.md）。
-     采集本身不在这里做 —— 采集器是独立进程，本机计划任务或云机器 cron 跑它。 */
+     采集本身不在这里做 —— 采集器是独立进程，本机计划任务或另一台机器上的 cron 跑它。 */
   /** 最新一批：合并后的信息流 + 模型简报 + 统计 + 各源状态 */
   newsFeed: () => call('/api/news/feed', { timeout: 30000 }),
   /** 资讯看板（页面主要就发这一个请求）：分类 / 情感 / 关键词热度 / 来源统计 / 定时任务 */
@@ -497,6 +505,12 @@ export const api = {
   newsApply: (body: any) => call('/api/news/apply', { method: 'POST', body, timeout: 20000 }),
   /** 手动跑一批 AI 概括（会等它跑完）：把当前这批原始条目变成 AI 事件卡 */
   newsDigest: () => call('/api/news/digest', { method: 'POST', timeout: 300000 }),
+  /**
+   * AI 概括这一轮的状态（几百字节的小接口，给页面「等它跑完」用）：
+   * `{ at, due, running, lastCount, model, lastError, lastErrorAt }`。
+   * 出卡是懒的（打开页面才跑一轮，20–60 秒），不盯它的话看到的永远是上一轮的结果。
+   */
+  newsAiStatus: () => call('/api/news/ai-status', { timeout: 15000 }),
   /** 追踪某张卡：下一轮 AI 在原卡上补齐（不重新生成） */
   newsTrack: (body: any) => call('/api/news/track', { method: 'POST', body, timeout: 20000 }),
   /* 语音随记：转写后端是标准 provider 接口（server/lib/asr.mjs），录音 → 起任务 → 轮询 → 落成记录 */
@@ -620,6 +634,131 @@ export const api = {
     return `${base}/api/zuotiben/export?${p.toString()}`
   },
   zuotibenExports: () => call('/api/zuotiben/exports', { timeout: 20000 }),
+
+  /* ------------------------------------------------------ WorkBuddy 号池 --
+   * 客户端是第三方开源网关 WorkBuddy2API（把上游账号包成 OpenAI 兼容 API）。网关自己
+   * 不随本仓库分发：装好后把目录填进 `config.workbuddy.dir`（没配 = 模块从侧边栏隐藏）。
+   * 这里的键只负责转发；网关的 CLI（登录 / 签到 / 活动 / 保活 / 查积分）由边车那侧调。
+   */
+
+  /**
+   * 账号池主机清单：本机 + `config.workbuddy.hosts[]` 里的远端机器。
+   * 远端主机的 key 在 credentials.json 的 `llm.keys['workbuddy-<id>']`；页面只用 keyConfigured 做提示。
+   */
+  workbuddyHosts: () => call('/api/workbuddy/hosts', { timeout: 15000 }),
+  /** 跨池矩阵：每台号池的账号 + 跨池重复的 uid（提示「同一个号别放两个池」） */
+  workbuddyMatrix: () => call('/api/workbuddy/matrix', { timeout: 30000 }),
+  /** 多台号池汇到一起（额度卡与看板用）；refresh=true 同步等一轮 */
+  workbuddyMerged: (refresh = false) =>
+    call(`/api/workbuddy/merged${refresh ? '?refresh=1' : ''}`, { timeout: refresh ? 60000 : 25000 }),
+  /** 额度总览：账号池 + 调用统计 + 积分包。默认读缓存；refresh=true 同步等一轮积分查询 */
+  workbuddySnapshot: (refresh = false, host = '') =>
+    call(wbQuery('/api/workbuddy/snapshot', { refresh: refresh ? '1' : '', host }), {
+      timeout: refresh ? 90000 : 20000,
+    }),
+  /** 账号池状态（网关内存，不出网） */
+  workbuddyStatus: (host = '') => call(wbQuery('/api/workbuddy/status', { host }), { timeout: 15000 }),
+  /** 网关调用统计：按天落盘，重启不丢。day 形如 2026-09-22，缺省今天 */
+  workbuddyStats: (day = '', host = '') => call(wbQuery('/api/workbuddy/stats', { day, host }), { timeout: 15000 }),
+  /** 真实积分包。默认走服务端缓存；refresh=true 强制刷新一次 */
+  workbuddyCredits: (refresh = false, host = '') =>
+    call(wbQuery('/api/workbuddy/credits', { refresh: refresh ? '1' : '', host }), { timeout: 180000 }),
+  /** 网关是否在跑 */
+  workbuddyHealth: (host = '') => call(wbQuery('/api/workbuddy/health', { host }), { timeout: 6000 }),
+  /** 连接凭据：Base URL + API key 掩码。reveal=true 才带明文（点显示/复制时才用） */
+  workbuddyCredential: (reveal = false, host = '') =>
+    call(wbQuery('/api/workbuddy/credential', { reveal: reveal ? '1' : '', host }), { timeout: 10000 }),
+  /** 支持的模型清单（含积分倍率、上下文、图片/推理能力）+ 服务端缓存时间戳 */
+  workbuddyModels: (refresh = false, host = '') =>
+    call(wbQuery('/api/workbuddy/models', { refresh: refresh ? '1' : '', host }), { timeout: 30000 }),
+  /** 网关请求日志（读网关自己写的日志文件；只覆盖网关「本次运行」） */
+  workbuddyLogs: (opts: { limit?: number; keyword?: string; onlyFail?: boolean; host?: string } = {}) => {
+    const qs = new URLSearchParams()
+    qs.set('limit', String(opts.limit ?? 200))
+    if (opts.keyword) qs.set('keyword', opts.keyword)
+    if (opts.onlyFail) qs.set('onlyFail', '1')
+    return call(`/api/workbuddy/logs?${qs.toString()}`, { timeout: 20000 })
+  },
+  /** 网关进程状态：在不在跑、PID、健康、自启位 */
+  workbuddyService: () => call('/api/workbuddy/service', { timeout: 15000 }),
+  /** 启动 / 停止网关（调网关自己的启动脚本） */
+  workbuddyStart: () => call('/api/workbuddy/start', { method: 'POST', timeout: 40000 }),
+  workbuddyStop: () => call('/api/workbuddy/stop', { method: 'POST', timeout: 40000 }),
+  /** 网关自己的独立自启位开关 */
+  workbuddyAutostart: (enabled: boolean) =>
+    call('/api/workbuddy/autostart', { method: 'POST', body: { enabled }, timeout: 20000 }),
+
+  /* 号池运维（账号池 / 批量任务 / 登录 / 配置 / 测聊）—— 都会改文件或出网，只在用户点按钮时调 */
+
+  /** 账号池合并视图：网关池状态 × 凭证文件（有效期 / 区域）× 积分缓存 */
+  workbuddyAccounts: () => call('/api/workbuddy/accounts', { timeout: 30000 }),
+  /** 单账号停用 / 启用 / 复活（网关 config 的 admin.enabled 为 false 时返回提示） */
+  workbuddyAccountAdmin: (uid: string, op: 'disable' | 'enable' | 'revive') =>
+    call('/api/workbuddy/account/admin', { method: 'POST', body: { uid, op }, timeout: 20000 }),
+  /** 手动导入凭证（粘贴 JSON；兼容嵌套式 / 扁平式 / 网关自带登录命令的输出） */
+  workbuddyImportAccount: (text: string) =>
+    call('/api/workbuddy/account/import', { method: 'POST', body: { text }, timeout: 20000 }),
+  /** 删除账号（必须回传 confirm=uid，边车才动手） */
+  workbuddyDeleteAccount: (uid: string) =>
+    call(`/api/workbuddy/account/${encodeURIComponent(uid)}?confirm=${encodeURIComponent(uid)}`, {
+      method: 'DELETE',
+      timeout: 20000,
+    }),
+  /**
+   * 立即执行一个任务。排程任务：checkin 签到 · activity 活跃上报 · travel 旅行 ·
+   * keepalive 保活 · school 开学季脚本 · cat 夜猫子脚本；额外动作：trial 领加油包 · credits 查积分；
+   * `all` = 一键完成（六类串行 + 步间等待 + 命中限流即停，边车侧保证不并发）。
+   * 会发积分的任务跑前后各查一次积分，用来算逐账号增量（所以 30 秒不够）。
+   */
+  workbuddyStartTask: (
+    kind: 'all' | 'checkin' | 'activity' | 'travel' | 'keepalive' | 'school' | 'cat' | 'trial' | 'credits',
+    uidPrefix = '',
+    host = '',
+  ) =>
+    call(wbQuery(`/api/workbuddy/tasks/${kind}`, { host }), {
+      method: 'POST',
+      body: { uidPrefix },
+      timeout: 30000,
+    }),
+  /** 本次边车运行过的任务（进程内，最多 50 条；逐账号明细按 id 再取） */
+  workbuddyRuns: (limit = 20, host = '') =>
+    call(`${wbQuery('/api/workbuddy/tasks', { host })}${host && host !== 'local' ? '&' : '?'}limit=${limit}`, {
+      timeout: 60000,
+    }),
+  workbuddyRunGet: (id: string, host = '') => call(wbQuery(`/api/workbuddy/tasks/${id}`, { host }), { timeout: 60000 }),
+  /** 活动管理：六类排程任务的开关 + 下次触发 + 最近一次结果 */
+  workbuddySchedule: (host = '', refresh = false) =>
+    call(wbQuery('/api/workbuddy/schedule', { host, refresh: refresh ? '1' : '' }), { timeout: 60000 }),
+  /** 保存开关（写网关的 config.json）；restart=true 时顺手重启网关让排程生效 */
+  workbuddyScheduleSave: (patch: Record<string, unknown>, restart = true) =>
+    call('/api/workbuddy/schedule', { method: 'POST', body: { patch, restart }, timeout: 90000 }),
+  /** 活动日志：网关排程 + 手动执行合流（按事件去重后落盘，边车重启不丢） */
+  workbuddyActivity: (opts: { limit?: number; task?: string; onlyCredit?: 0 | 1; day?: string } = {}) => {
+    const qs = new URLSearchParams()
+    if (opts.limit) qs.set('limit', String(opts.limit))
+    if (opts.task) qs.set('task', opts.task)
+    if (opts.onlyCredit) qs.set('onlyCredit', '1')
+    if (opts.day) qs.set('day', opts.day)
+    const s = qs.toString()
+    return call(`/api/workbuddy/activity${s ? `?${s}` : ''}`, { timeout: 20000 })
+  },
+  /** 网页登录第 1 步：拿授权链接（state 由网关的登录命令落在系统临时目录） */
+  workbuddyLoginStart: (realm: 'cn' | 'global' = 'cn') =>
+    call('/api/workbuddy/login/start', { method: 'POST', body: { realm }, timeout: 60000 }),
+  /** 网页登录第 2 步：查一次登录结果；{ pending:true } 表示浏览器那边还没走完 */
+  workbuddyLoginPoll: (realm: 'cn' | 'global' = 'cn') =>
+    call('/api/workbuddy/login/poll', { method: 'POST', body: { realm }, timeout: 60000 }),
+  /** 网关配置：读原文 + 解析结果 + 备份信息 */
+  workbuddyConfig: () => call('/api/workbuddy/config', { timeout: 20000 }),
+  /** 保存配置（首次保存前边车会留一份 .ws.bak） */
+  workbuddyConfigSave: (doc: unknown) =>
+    call('/api/workbuddy/config', { method: 'PUT', body: { doc }, timeout: 30000 }),
+  workbuddyConfigRestore: () => call('/api/workbuddy/config/restore', { method: 'POST', timeout: 30000 }),
+  /** 重启网关（改配置 / 加删账号后生效） */
+  workbuddyRestart: () => call('/api/workbuddy/restart', { method: 'POST', timeout: 90000 }),
+  /** 非流式测聊（要完整回复与 usage 时用） */
+  workbuddyChat: (body: Record<string, unknown>) =>
+    call('/api/workbuddy/chat', { method: 'POST', body: { ...body, stream: false }, timeout: 190000 }),
 }
 
 export type MemoSummaryEvent =
@@ -777,6 +916,50 @@ export async function wikiChatStream(
         onEvent({ type: 'end' })
       } else if (f.kind === 'exception') {
         onEvent({ type: 'error', error: f.error?.message ?? '流式请求失败' })
+      }
+    },
+  })
+}
+
+/* ------------------------------------------------- 流式（号池测聊） --- */
+
+/** 测聊的一帧。字段与边车 lib/workbuddy-ops.mjs 的 chatStream 一一对应 */
+export interface WbChatEvent {
+  delta?: string
+  reasoning?: string
+  error?: string
+  gatewayHint?: string
+  httpStatus?: number
+  done?: boolean
+  ttfbMs?: number
+  elapsedMs?: number
+  finishReason?: string
+  usage?: any
+}
+
+/**
+ * 流式测聊：边车 → 网关 → 上游，逐帧回调。
+ *
+ * 读流那套（POST + 空行分帧 + 半帧容错）在 core/sse.ts，这里只管把失败翻成事件。
+ */
+export async function workbuddyChatStream(
+  body: Record<string, unknown>,
+  onEvent: (e: WbChatEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  await readSseStream(`${base}/api/workbuddy/chat`, { ...body, stream: true }, onEvent, {
+    signal,
+    getToken: ensureToken,
+    onFailure: (f) => {
+      if (f.kind === 'http') {
+        onEvent({ error: `边车返回 HTTP ${f.status}${f.text ? `：${f.text.slice(0, 200)}` : ''}`, done: true })
+      } else if (f.kind === 'no-body') {
+        onEvent({ error: '边车没有返回流（当前环境不支持流式读取）', done: true })
+      } else if (f.kind === 'abort') {
+        // 用户点「停止」是我们自己 abort 的，不该报成错误
+        onEvent({ done: true, error: '已停止' })
+      } else if (f.kind === 'exception') {
+        onEvent({ error: f.error?.message ?? '流式请求失败', done: true })
       }
     },
   })

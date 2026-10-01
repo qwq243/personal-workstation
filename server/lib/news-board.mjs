@@ -58,6 +58,12 @@ const SOURCE_CAT = {
   'world-dw': 'world',
   'tech-ithome': 'tech',
   'tech-ifanr': 'tech',
+  /**
+   * B 站视频源（2026-09-30 加）：关键词都没命中时兜到「世界」——
+   * 不写这一条会落到 `other`，而页面的页签只有 我相关 / AI 圈 / 科技工具 / 世界 / 全部，
+   * `other` 只在「全部」里看得见（点「世界」就找不到它了）。
+   * 关键词仍然优先（讲 AI 的那期会进 AI 圈），这条只是兜底。
+   */
 }
 
 /**
@@ -257,8 +263,22 @@ function collectorTasks() {
 
 /* ----------------------------------------------------------- 看板 --- */
 
+/**
+ * 条目时间 → 毫秒时间戳。认三种形状：
+ *   ① 数字时间戳：10 位当 epoch **秒**、13 位当毫秒；
+ *   ② RFC822（RSS 的 `pubDate`）、ISO、以及 `Date.parse` 认得的其它中文/英文日期；
+ *   ③ 其它 → 0（页面上按「无日期」处理：不参与时效排序，也不做过期剔除）。
+ *
+ * 为什么要专门认数字（2026-09-30）：v2ex 的 `created` 就是 `"1790728324"`，
+ * `Date.parse('1790728324')` 是 NaN ⇒ ts=0 ⇒ 那几条在页面上永远排不进时间线、
+ * 时间档位一筛就消失，也永远不会被判「过期」—— 看起来就是「资讯不更新」。
+ */
 const toTs = (s) => {
-  const t = Date.parse(String(s || ''))
+  const raw = String(s ?? '').trim()
+  if (!raw) return 0
+  if (/^\d{10}$/.test(raw)) return Number(raw) * 1000
+  if (/^\d{13}$/.test(raw)) return Number(raw)
+  const t = Date.parse(raw)
   return Number.isFinite(t) ? t : 0
 }
 

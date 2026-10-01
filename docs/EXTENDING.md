@@ -511,7 +511,7 @@ const HANDLERS = {
 }
 ```
 
-`tools/call` 是**按名字**从 `HANDLERS` 里取的（`server/mcp.mjs`），写错只在调用时回 `未知工具：xxx` —— 目前没有测试会替你拦住这种不一致，加完自己调一次。`server/mcp.mjs` 里已有 43 个工具，可以照抄一个形状（注意 `ok(text, { data })` 这个 helper 的用法）。
+`tools/call` 是**按名字**从 `HANDLERS` 里取的（`server/mcp.mjs`），写错只在调用时回 `未知工具：xxx` —— 目前没有测试会替你拦住这种不一致，加完自己调一次。`server/mcp.mjs` 里已有 55 个工具，可以照抄一个形状（注意 `ok(text, { data })` 这个 helper 的用法）。
 
 ### 3.6 验证
 

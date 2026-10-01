@@ -77,7 +77,7 @@
 
 | 通道 | 形状 | 用在哪 | 代码 |
 |---|---|---|---|
-| JSON API | `GET/POST/PATCH/PUT/DELETE /api/*`，统一回 `{ ok, ... }` | 绝大多数读写 | `server/index.mjs` 里 199 条 `route()` 注册 |
+| JSON API | `GET/POST/PATCH/PUT/DELETE /api/*`，统一回 `{ ok, ... }` | 绝大多数读写 | `server/index.mjs` 里 234 条 `route()` 注册 |
 | SSE | `text/event-stream`，帧是 `data: {json}\n\n` | 需要边生成边看的地方：知识库问答、语音随记总结 | `/api/wiki/chat/stream`、`/api/memo/summarize/stream` |
 | MCP | JSON-RPC 2.0 子集（`initialize`/`tools/list`/`tools/call`/`ping`），挂在 `/mcp` | 让智能体（MCP 客户端）读写工作站数据 | `server/mcp.mjs`，54 个工具 |
 
@@ -441,7 +441,7 @@ startServer()                                        :1323
 | 取舍 | 换来了什么 | 代价 |
 |---|---|---|
 | 单进程、无数据库，数据是普通 JSON 文件 | 备份 = 目录拷走；出问题能直接打开文件看；没有迁移脚本 | 没有并发控制（靠 `jsonstore` 的 `rev` 乐观并发 + 后写覆盖留证）；数据量大时整份读写 |
-| 路由表是数组 + `RegExp` 逐条匹配（`server/index.mjs` 的首条命中即停的匹配循环） | 零依赖、可读、加一条就是一行 | O(n) 匹配（当前 **199** 条 `route()` 注册，实测无感）；没有统一参数校验层，校验散在各处理器里 |
+| 路由表是数组 + `RegExp` 逐条匹配（`server/index.mjs` 的首条命中即停的匹配循环） | 零依赖、可读、加一条就是一行 | O(n) 匹配（当前 **234** 条 `route()` 注册，实测无感）；没有统一参数校验层，校验散在各处理器里 |
 | 同步写（`writeFileSync` + `renameSync`） | 同一进程内「Web 与 MCP 同时写」天然串行，不需要锁 | 真正的风险是进程被杀 / 磁盘满 —— 由原子写 + `.bak` + 每日快照 + `.corrupt` 留证兜 |
 | 模型输出预算集中在 `server/lib/llm.mjs` | 「思考 token 吃光正文」这类跨厂商问题只解一次 | 调用方不能自己拍 `maxTokens`；要新档位就改 `BUDGET`（`:27-34`） |
 | 边车同时发前端（生产态同源） | 部署 = 双击；不需要配反代 | 首屏与 API 抢同一个 HTTP/1.1 连接 |

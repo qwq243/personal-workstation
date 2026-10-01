@@ -8,7 +8,7 @@
 
 ## 1. 注册了的功能模块
 
-「注册了」= 在 `src/features/index.ts:28-43` 的 `registerAllModules()` 里出现过（当前 11 行 `registerModule(...)`）。
+「注册了」= 在 `src/features/index.ts:28-43` 的 `registerAllModules()` 里出现过（当前 12 行 `registerModule(...)`）。
 侧边栏、首页卡片、路由表都由注册表派生（见 [ARCHITECTURE.md §2](ARCHITECTURE.md)）。
 
 | 模块 | id | 入口路由 | 一句话 | 依赖的外部服务 | 需要配什么 | 数据落哪 |
@@ -16,6 +16,7 @@
 | **每日看板** | `dashboard` | `#/dashboard` | 今天的计划 / 记录 / 心情 / 复盘 + 连续天数 + 模型花费，AI 给要点与建议（三张卡：今日 / 趋势与记录 / AI 助手） | 模型端点（**可选**：只影响 AI 卡；没有也能记计划） | `newapi.baseUrl` + `ai.model` + `llm.keys.workstation` | `data/dashboard.json`、`data/ai-summaries.json`、`data/cache/overview.json` |
 | **日历日程** | `calendar` | `#/office/calendar` | 月/周两种视图，把「学校怎么安排」和「我留下了什么」叠在一张表上 | **无**（只读本机校历文件 + 看板数据） | 放一份校历到 `data/school-calendar.json`（出厂是示例数据） | 读 `data/school-calendar.json`、`data/dashboard.json`（写入也落看板） |
 | **模型用量** | `office-usage` | `#/office/usage` | 余额、今日花费、小时分布、按模型/密钥的分布、请求日志 | NewAPI 兼容端点的**面板接口**（`/api/*`） | `newapi.baseUrl` + **`newapi.token`（面板系统令牌）** | `data/newapi-cache.json`（两级定时同步的落盘缓存） |
+| **号池** | `office-workbuddy` | `#/office/workbuddy` | 第三方网关 WorkBuddy2API 的客户端：**额度概览**（积分 / 账号池状态 / 调用统计 / 请求日志 / 模型清单）· **账号池**（增删停用复活、网页登录、粘贴导入凭证）· **活动管理**（六类排程任务的开关与逐账号明细日志）· **测聊** · **网关配置**（读 / 存 / 备份 / 重启） | 那个网关**不随本仓库分发**（自己装一份，MIT） | `workbuddy.dir`（**没配就从侧边栏隐藏**）+ `workbuddy.baseUrl`；远端号池再加 `workbuddy.hosts[]` | 网关自己的目录（`auths/` 凭证、`config.json`）与 `data/workbuddy-cache*.json`、`data/workbuddy-activity.json` |
 | **规划台** | `plan` | `#/plan` | 长期目标：关键日期倒计时 + 项目与下一步 + 备考清单 | **无** | 无（出厂空态，页面上自己加） | `data/plan.json`（`jsonstore` 加固写） |
 | **英语学习** | `vocab` | `#/vocab` | 每日一句（写翻译→核对→自评打卡）+ 单词（词单/练习/错题本/训练计划，SRS） | 有道的**公开**发音音频（由边车代理，命中缓存不再出网）；朗读整句可选走边车 `tts`；每日一句要自备句库 | 转写/模型都不需要；每日一句要按 [每日一句导入.md](每日一句导入.md) 导入句库 | `data/vocab/{lists,progress}.json`、`data/vocab/audio/`、`data/english/daily-sentence/{sentences,progress}.json` |
 | **做题本** | `zuotiben` | `#/zuotiben`（+ `/zuotiben/print`、`/zuotiben/sentence`、`/zuotiben/sentence-print`） | 每日一题：一题一卡（打勾「做对」/ 打叉「做错」，点留白处当场出答案与解析）、一题一页 A4 打印（空白 / 答案内联 / 答案在后三选一，横竖可选）、**服务端真出 PDF**；另有「每日一句」那一册 | 导出 PDF 要本机 **Chrome / Edge**；「推荐同类题」要自备题库池（两份 markdown） | 无（**故意不设门槛**：题让智能体灌就能用）。可选 `zuotiben.pool.{dir,problems,solutions}`，格式见 [zuotiben-import.md](zuotiben-import.md) | `data/zuotiben.json`（按天的题 + 做过/做错/备注）、`data/exports/`（导出的 PDF）、`data/export-profile/`（打印用的浏览器 profile） |
@@ -34,7 +35,7 @@
 |---|---|---|
 | **本机** | `local` | 进程守护（7）· 运行与自启（8） |
 | **学习** | `study` | 做题本（10）· 英语学习（11）· 知识库（12）· 资讯（13） |
-| **智能体** | `ai` | 模型用量（21） |
+| **智能体** | `ai` | 模型用量（21）· 号池（22） |
 | **工具** | `tools` | 语音随记（30） |
 | **日常** | `office` | 每日看板（40）· 日历日程（41）· 规划台（42） |
 
@@ -42,6 +43,7 @@
 
 | 模块 | 缺口 | 依据 |
 |---|---|---|
+| 号池 | **不带网关本体**：这个仓库只有「客户端 + 边车转发」那半，网关（账号轮转、熔断冷却、积分记账、排程定时）是别人的开源项目，自己装。所以**没配 `workbuddy.dir` 时整个功能不显示**，不是坏了。另外远端号池要在那边放好脚本并把路径填进 `workbuddy.hosts[]`，本版不带任何写死的路径 | `src/features/workbuddy/module.ts`、`server/lib/workbuddy.mjs` 头注释 |
 | 资讯 | **不带采集器本体**：这个仓库只有「读产物 + 出页面」那半，采集（源清单、代理、浏览器自动化）是各人自己的事。仓库里只给契约（[news-contract.md](news-contract.md)）与一个最小示例 `scripts/collector-skeleton.mjs`（抓两个公开 RSS）。所以**没配 `collector.dir` 时整个功能不显示**，不是坏了 | `src/features/news/module.ts:23`、`server/lib/newsfeed.mjs` 头注释 |
 | 做题本 | **不带题库内容**：题干与解析是版权材料，仓库里只有解析器（`server/lib/kaproblems.mjs`）、配置与格式文档（[zuotiben-import.md](zuotiben-import.md)）。没配题库池时做题本照常能用（题靠智能体灌），只是没有「推荐同类题」；两本册子的**题干/参考答案/译文**都要自己导入 | `src/features/zuotiben/module.ts:18-23`、`server/lib/kaproblems.mjs` |
 | 语音随记 | **不带本机实时采集链路**：开源版只接受拖入 / 选择的音频文件（页面不做浏览器内录音），不含虚拟声卡设备名、第三方客户端私有接口与命令行工具路径 | `src/features/memo/module.ts`、见 §7.1 / §7.2 |
@@ -145,6 +147,10 @@
 | `news-comments.mjs` | 208 | 论坛评论抓取（「单事件情绪」那半）；认几类公开不登录的接口，可走 `collector.proxy` |
 | `pguard.mjs` | 1400 | 进程守护引擎（规则、迟滞、动作预算、保护层、审计） |
 | `newapi.mjs` | 454 | 模型端点客户端（面板类 + OpenAI 兼容对话） |
+| `workbuddy.mjs` | 1095 | 号池读侧：网关状态 / 统计 / 积分包 / 请求日志 / 模型清单 / 跨池矩阵 / 网关进程启停（网关目录没配时给「还没配」） |
+| `workbuddy-ops.mjs` | 731 | 号池运维：账号池明细（网关内存 × `auths/` 凭证 × 积分缓存）、网页登录两步、凭证导入删除、网关配置读写与备份、测聊（含流式） |
+| `workbuddy-activity.mjs` | 1564 | 活动任务：六类排程任务的开关与手动执行、逐账号明细日志（网关排程与手动执行合流、按事件去重落盘）、限流即停 |
+| `workbuddy-remote.mjs` | 172 | 远端号池：经 SSH 在那台机器上跑它自己的任务脚本 / 读它的排程（脚本路径来自 `workbuddy.hosts[]`，留空则不支持） |
 | `wiki.mjs` | 1390 | 知识库：页面读写、双链图谱、检索、lint、编译入库、多库 |
 | `wiki-parse.mjs` | 480 | 多通道文档解析（pandoc → LibreOffice → Python → pdftotext → 云端） |
 | `wiki-queue.mjs` | 406 | 入库队列 + 源目录监听 + 环境自检 |
@@ -167,15 +173,15 @@ server/lib/transfer/README.md     ← 只有一个 README，没有任何 provide
 
 ---
 
-## 4. MCP 工具（54 个）
+## 4. MCP 工具（55 个）
 
 边车在 `/mcp` 上挂 JSON-RPC 子集（`server/mcp.mjs`），`TOOLS` 与 `HANDLERS` **两边名字必须一致**
-（54 对 54，已核对）。
+（55 对 55，已核对）。
 
 | 分组 | 工具 |
 |---|---|
 | 看板（7） | `get_dashboard` `get_overview` `add_plan` `update_plan` `add_note` `set_day_review` `get_recent_days` |
-| 模型端点（1） | `get_balance` |
+| 模型端点（2） | `get_balance` `get_workbuddy` |
 | AI（2） | `ai_summary` `ai_review` |
 | 单词（10） | `list_vocab_lists` `get_vocab_words` `add_vocab_words` `remove_vocab_words` `create_vocab_list` `get_vocab_progress` `get_vocab_review_advice` `get_vocab_due` `get_vocab_sessions` `dedupe_vocab` |
 | 规划台（4） | `get_plan` `update_project` `update_prep` `set_goal_date` |
@@ -307,7 +313,7 @@ node 路径从 `WS_NODE` 或 PATH 找）、`pguard-smoke.mjs`（判定基线）�
 |---|---|---|
 | **校方系统（课表 / 成绩 / 签到 / 考勤）**：曾有一个校内系统模块（多个页面 + 校方接口客户端 + 自动签到），依赖某校的私有接口（要身份凭据与专有 Key）与第三方 H5 签到 | 隐私与合规取舍（别人的身份凭据不该进开源仓库；代替本人完成考勤涉及定位与身份冒用）—— 未随仓库分发 | 写一个 `server/lib/<你的校方客户端>.mjs` 当客户端 + 一组 `/api/*` 路由 + 一个前端模块（三步法）。`#/dev-guide` 的三步模板就是给这件事用的。**注意别提交任何凭据**（见 [CONFIG.md §8](CONFIG.md)） |
 | **链路认证保活**：整套实现 + 硬编码的门户地址、加密密钥与认证参数模板，以及只对一台机器成立的网卡 / 出口拓扑结论 | 对一个陌生人不只是无用，是**误导**（照抄参数会指向一个不存在的门户） | 真正值得留的是方法论，不是实现：**「只补登不登出」**与**「判定只认门户只读接口、不信探测」**这两条已经写进 [ARCHITECTURE.md §7](ARCHITECTURE.md) 当设计教训。代码要自己重写（门户地址、加密参数都得你实测） |
-| **账号池自动化**：一整套对某商业服务的多账号轮转刷分（六类排程任务、realm 路由绕过、防限流节流） | 它依赖一个未随项目分发的第三方网关，且把「商业服务的账号池运维」做成了产品 —— 开源等于把服务条款风险与凭据管理责任一起转给下游 | **不建议加回来。** 若只想要「用量看板」这个形态，现在的「模型用量」页（`src/features/office/usage.module.ts`）已经是那个形态、且只读、够用 |
+| **号池（第三方网关的客户端）**：某商业服务账号的多账号轮转 —— 额度看板 + 账号池运维 + 六类排程任务 + 网页登录 + 测聊 + 网关配置 | 网关本体是**别人的开源项目**（MIT），本仓库只带**客户端与边车转发**：不重写上游调用、不带网关二进制、不带任何账号凭据。**用之前先自己过一遍那个服务的使用条款** —— 多账号轮转与自动任务未必符合条款，风险与凭据管理责任由使用者自负 | **已随仓库分发**（`src/features/workbuddy/` + 四个 `server/lib/workbuddy*.mjs`）。装好网关、把目录填进 `workbuddy.dir` 就出现；不装则模块隐藏。只想要「用量看板」形态的话，不装网关即可 —— 它不会占任何位置 |
 | **云盘实现**：播放器 + 上传下载 + 目录别名 | 建在某个云盘的私有接口上 —— **不带任何依赖第三方客户端私有接口 / 逆向的能力**：换个版本就失效，还要把个人账号登录态交给工具 | 接口位已经留好：见 [文件传输.md](文件传输.md)。接 WebDAV / S3 / rclone，**上传下载都做成「起任务 + 轮询」**（照 `memo.mjs` 的任务模型），凭据放 `credentials.json` |
 | **两层网关里的云那一层**：本机网关 + 云端那半层，两层共同构成一条链路；仓库里只有本机那一半，且配置里带着真实渠道密钥 | 陌生人拿到手只能看到一半架构 —— 那比不给更糟 | 要这个分层就自己搭两层；那类实现**没有带**。若只想接一个上游，直接用 `server/lib/net.mjs` 的 `request()` 写个薄客户端 |
 | **个人画像**：一份可读写的个人档案页，装的是作者的三年主线、停止项与时间线 | 那是**私人人生规划的文本**，不是可复用的功能；抽掉数据后页面几乎是空壳（278 行） | 想要「一个可读写的档案页」，用「语音随记」的 records 或看板的记录做另一种视图即可；**数据侧不要任何种子** |

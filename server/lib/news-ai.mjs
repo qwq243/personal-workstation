@@ -131,7 +131,10 @@ const SYS = () =>
   'summary 里凡有明确日期的事都把日期写出来（如「9 月 26 日」），让人一眼看出新旧。' +
   '宁缺勿滥：凑不齐就少给几张，别把不相干的硬塞进一张。' +
   '⑩ 那个顶层 `summary`（这一段的总览）**只写真发生了的事**，不要写「本批没有 X 类内容」「无新增」这类空话；' +
-  '每一段独立写，最后会被拼成整批的大总结，所以别假设你看得到别的段。'
+  '每一段独立写，最后会被拼成整批的大总结，所以别假设你看得到别的段。' +
+  '⑪ **B 站视频条目**（来源名带「B站」）：卡片写清**这期讲了什么、UP 主的观点或结论**（标题与简介里就有）；' +
+  '简介里那句「弹幕在刷：…」是观众的反应，最多在 summary 里带一句当背景，**不许当事实**；' +
+  '播放 / 评论 / 弹幕的数字不用写进卡里（那是数据面，页面自己会显示）。'
 
 /** 标签白名单（规范 §1.1）：只认这几个，模型爱自由发挥会让标签聚不起来 */
 const TAG_SET = new Set(['新产品', '教程', '薅羊毛', '工具', '论文', '政策', '招聘', '讨论'])
@@ -177,14 +180,50 @@ export function pickPool(items = []) {
    * 送进模型的名额分配：**先按类留位，再拿新增补满**。
    * 为什么不是简单的「优先项优先」：优先池本身就有几十条（官方公告不常更新、一直是头几条），
    * 直接切前 45 会把**关注的那几类**整批挤掉（2026-09-28 实测：问了 45 条，focus 一条都没有）。
+   *
+   * **平台下的账号类源（`x-*`）单列一档**：这类源的条目多、又常常不带「新」的标记，
+   * 只靠 `fresh` 永远轮不到它们；实测整池会被公告 + 论坛热源占满，那个平台一条都进不来。
    */
+  const xItems = all
+    .filter((x) => String(x.sourceId).startsWith('x-') && x.ts)
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, 12)
+  /**
+   * **B 站视频也单列一档**：一个账号一天就一两条，量小但绝不能被论坛 / 公众号那些
+   * 热源挤出去（跟 X 当初的问题一模一样）—— 留 4 席，按发布时间取最新。
+   */
+  const biliItems = all
+    .filter((x) => String(x.sourceId).startsWith('bili-') && x.ts)
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, 4)
   const picked = [
     ...byCat('focus').slice(0, 6),
     ...byCat('kaoyan').slice(0, 8),
+    ...xItems,
+    ...biliItems,
     ...fresh,
     ...all,
   ]
   return [...new Map(picked.map((x) => [x.id || x.url, x])).values()].slice(0, MAX_ITEMS_PER_BATCH)
+}
+
+/**
+ * 这一池条目**变了没有**（指纹，不是 `max(ts)`）。
+ *
+ * 为什么不能用 max(ts) 当水位：好些源根本没有可用日期 —— linux.do 的列表页原先只抓标题
+ * 与链接（`date:""`），v2ex 给的又是 epoch 数字（老版本 `Date.parse` 认不出）。水位定在
+ * `max(ts)` 上，只要**没有更新带日期的条目**出现，指纹就一动不动：于是每 30 分钟都判
+ * 「这批已经概括过」（reason='already'），页面上的事件卡与 AI 大总结就再也不刷新 ——
+ * 而采集器其实一直在出新条目。
+ *
+ * 改成「池子里到底是哪些条目」的指纹：条目换了（哪怕它没有日期）就重跑一轮；
+ * 池子完全没变才跳过。配合下面「全被覆盖过就不写卡」，既不会冻住，也不会刷重复卡。
+ */
+function poolSig(pool) {
+  const ids = pool.map((x) => String(x.id || x.url || x.title || '')).sort()
+  let h = 5381
+  for (const s of ids.join('|')) h = ((h * 33) ^ s.charCodeAt(0)) >>> 0
+  return `${Math.max(0, ...pool.map((x) => x.ts || 0))}:${pool.length}:${h.toString(36)}`
 }
 
 /**
@@ -201,7 +240,7 @@ export function tick(items, { force = false } = {}) {
   const due = force || Date.now() - Number(readJson(STATE(), {}).at || 0) > BATCH_MINUTES * 60_000
   const all = items ?? []
   const pool = pickPool(all)
-  const batchId = pool.length ? String(Math.max(...pool.map((x) => x.ts || 0))) : ''
+  const batchId = pool.length ? poolSig(pool) : ''
   if (!pool.length || !due || (!force && batchId === String(st.lastBatchId || ''))) {
     return Promise.resolve({ skipped: true, reason: !pool.length ? 'no-items' : !due ? 'not-due' : 'already' })
   }
@@ -219,17 +258,20 @@ export function tick(items, { force = false } = {}) {
      */
     const CAP_PER_SOURCE = 4
     /**
-     * 跨批去重（2026-09-29 加）：最近 4 批里**已经成过卡**的原始条目，不再喂给模型。
+     * 跨批去重（2026-09-29 加、2026-09-30 放宽到「文件里留着的全部批次」）：
+     * **已经成过卡**的原始条目，不再喂给模型。
      *
      * 为什么需要：低频源（每轮几乎不变的公告页）改成「每天一次」之后，它们的条目一天里
      * 几乎不变 —— 不排掉就会**每 30 分钟重新出一张一模一样的卡**（实测：同一条连出 3 批，
      * 页面上一眼看过去就是重复）。同一批内部的重复由 seenTitle 管，这里管跨批。
+     * 原来只看最近 4 批，是因为水位（max ts）几乎不让它重跑；现在水位改成池指纹、
+     * 一轮里更容易只多出几条新东西，回看窗口窄了就会把老条目重新成卡 —— 所以放宽到全文件
+     * （cards.json 本身就只留 20 批，Set 也就几百条，代价可忽略）。
      * 例外：点过「追踪」的卡 —— 那种就是要反复补厚的。
-     * 兜底：万一全被覆盖（比如刚清过缓存），宁可重复也别把这一轮空着。
      */
     const normKey = (s) => String(s ?? '').replace(/[\s·—\-_|｜「」【】（）()]/g, '').slice(0, 40)
     const covered = new Set()
-    for (const b of cards().slice(0, 4)) for (const c of b.cards ?? []) for (const sc of c.sources ?? []) covered.add(normKey(sc.title))
+    for (const b of cards()) for (const c of b.cards ?? []) for (const sc of c.sources ?? []) covered.add(normKey(sc.title))
     const trackedKeys = tracked.map((t) => normKey(t.title).slice(0, 10)).filter(Boolean)
     const isCovered = (x) => {
       const k = normKey(x.title)
@@ -238,9 +280,22 @@ export function tick(items, { force = false } = {}) {
       return true
     }
     const feed = news.filter((x) => !isCovered(x))
+    /**
+     * 池子里全是被前面批次覆盖过的条目（这一轮其实没有新东西）：**别调模型，直接收工**。
+     * 以前这里退回「用全部条目」兜底（当年是为了不让一轮空着），但水位改成池指纹之后
+     * 那条兜底会变成「同一件事每隔半小时重出一张卡」；宁可这轮不写卡。
+     *
+     * 只记下这批池子的指纹、**不动 `at`**：`at` 是页面上那句「N 张事件卡 · 多久之前」
+     * 的时间锚（`status.at`），没出卡就不该让它显得更新。指纹记下来，下一轮
+     * 「池子没变」会被上面的 already 判定拦住，这一轮既没有模型调用也没有多余文件写。
+     */
+    if (!feed.length) {
+      writeJson(STATE(), { ...state(), lastBatchId: batchId })
+      return { ok: true, count: 0, skipped: 'all-covered', asked: {} }
+    }
     const picked = []
     const seat = new Map()
-    for (const it of (feed.length ? feed : news).sort((a, b) => fb.weightFor(b) - fb.weightFor(a))) {
+    for (const it of feed.sort((a, b) => fb.weightFor(b) - fb.weightFor(a))) {
       const k = it.sourceId || it.source || '?'
       const n = seat.get(k) || 0
       if (n >= CAP_PER_SOURCE) continue
@@ -355,13 +410,34 @@ export function tick(items, { force = false } = {}) {
       }
       if (!model && r.model) model = String(r.model)
       const content = String(r.content ?? '')
-      const m = content.match(/\{[\s\S]*\}/)
-      let parsed
-      try {
-        parsed = JSON.parse(m ? m[0] : content)
-      } catch {
-        lastErr = '模型回了 JSON，但里头的 cards 结构没对上：' + content.slice(0, 160)
-        continue
+      const parseChunk = (txt) => {
+        const m = String(txt).match(/\{[\s\S]*\}/)
+        try {
+          return JSON.parse(m ? m[0] : txt)
+        } catch {
+          return null
+        }
+      }
+      let parsed = parseChunk(content)
+      if (!parsed) {
+        /**
+         * 正文是**半截 JSON**（模型想到一半把输出预算吃光，末尾被截断）——这在
+         * 思考型模型上很常见（2026-09-30 实测：两次「cards 结构没对上」就是这么来的）。
+         * 光 `continue` 等于这一片的条目白喂了，所以**放大预算再要一次**：
+         * `chatGuarded` 的预算是按输入体量（chars）算的，把 chars 报大一点即可 ——
+         * 这也是这一层唯一能合法影响预算的口子（别去自己拍 maxTokens）。
+         */
+        const r2 = await chatGuarded(ask, {
+          tier: 'doc',
+          chars: Math.round(partLines.length * 1.8),
+          label: `news-digest-${i / CHUNK + 1}-json`,
+          temperature: 0.2,
+        })
+        parsed = r2.ok ? parseChunk(r2.content ?? '') : null
+        if (!parsed) {
+          lastErr = '模型回了 JSON，但里头的 cards 结构没对上：' + content.slice(0, 160)
+          continue
+        }
       }
       okChunks++
       /**
@@ -381,7 +457,20 @@ export function tick(items, { force = false } = {}) {
         cardList.push(c)
       }
     }
-    if (!okChunks) return { ok: false, error: `模型调用全部失败：${lastErr || '未知'}` }
+    if (!okChunks) {
+      /**
+       * 全部失败**别静默**（2026-09-30 补）：这条流水线是懒跑的，失败时页面只会「保持上一批」，
+       * 看到的现象就是「资讯又没更新」而查不出原因。写进 state（页面能显示）+ 写日志（排障能看见）。
+       */
+      const msg = `模型调用全部失败：${lastErr || '未知'}`
+      try {
+        writeJson(STATE(), { ...state(), lastError: msg, lastErrorAt: Date.now() })
+      } catch {
+        /* 状态写不进去也不能影响返回 */
+      }
+      console.warn(`[news-ai] 本轮概括失败：${msg}`)
+      return { ok: false, error: msg }
+    }
 
     // 批总览 = 各分片的小总览合并（见上面 summaryParts）；每段去掉结尾的标点，免得拼出「。；」
     summary = summaryParts.map((s) => s.replace(/[。.；;\s]+$/, '')).join('；')
@@ -417,7 +506,20 @@ export function status() {
     batches: s.batches ?? 0,
     lastCount: last?.count ?? 0,
     model: last?.model ?? '',
+    /**
+     * 上一次失败（同一轮里所有模型分片都挂了）→ 页面会在「AI 大总结」旁边写一句，
+     * 让人知道「不是没新东西，是概括失败、可以点「现在概括」重试」。
+     * 只要有一次成功的批，`at` 会晚于 `lastErrorAt`，页面自然就不显示了。
+     */
+    lastError: String(s.lastError || ''),
+    lastErrorAt: Number(s.lastErrorAt || 0),
     due: Date.now() - Number(s.at || 0) > BATCH_MINUTES * 60_000,
+    /**
+     * 这会儿是不是正在概括（新一轮已经起头、还没落盘）。
+     * 页面用它决定「要不要等一会儿再刷一次」——出卡是懒的（打开页面才跑，一轮 20-60 秒），
+     * 不告诉页面的话，看到的永远是上一轮的结果，观感就是「资讯不更新」。
+     */
+    running: !!busy,
     /** 各批次概要（更早的批次用）：新批在前，每批一句 + 卡数 */
     periods: list.slice(0, 8).map((b) => ({ at: b.at, summary: b.summary ?? '', count: b.count ?? 0 })),
   }

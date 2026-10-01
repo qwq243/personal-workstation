@@ -52,6 +52,8 @@ export const CONFIG_EDITABLE = {
   news: ['focusKeywords'],
   // 做题本：题库池的三条路径
   zuotiben: ['pool'],
+  // 号池（第三方网关 WorkBuddy2API 的客户端）：网关目录/地址、启停脚本、解释器、自启项、多台主机
+  workbuddy: ['dir', 'baseUrl', 'label', 'autoStart', 'startCmd', 'stopCmd', 'python', 'autostartVbs', 'hosts'],
   // 知识库自己的（强业务）：库目录、监听、队列上限
   wiki: [
     'dir',

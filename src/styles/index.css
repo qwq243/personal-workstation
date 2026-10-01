@@ -20,6 +20,13 @@ body,
   padding: 0;
 }
 
+/* 安卓浏览器（部分国产内核尤其激进）的「字体自动放大」会把文本撑出容器 ——
+   现象是手机档整页内容比视口宽、卡片顶到屏幕两边还被裁。全站显式关掉。 */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   font-family: var(--ws-font);
   font-size: var(--ws-fs-base);

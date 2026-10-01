@@ -50,7 +50,7 @@
 
 1. **能力表** `server/lib/capabilities.mjs`（**本仓库还没有，待建**）：每个能力一行
    `{ id, kind, description, params, handler, http?: {...}, mcp?: {...} }`。
-   REST 路由与 MCP 工具从它派生 → 消灭"能力清单写三遍"（现在 157 条 REST 路由 / MCP 工具 / 前端 `api.*` 各一份）。
+   REST 路由与 MCP 工具从它派生 → 消灭"能力清单写三遍"（现在 234 条 REST 路由 / MCP 工具 / 前端 `api.*` 各一份）。
 2. **门禁脚本**（`npm test` 的一部分，缺哪个补哪个）：
    - 配置一致性：`DEFAULTS` ↔ 白名单 ↔ `config.example.json` ↔ 设置页表单，四者键集必须一致
      —— 已在 `scripts/tests/config-whitelist.test.mjs`；

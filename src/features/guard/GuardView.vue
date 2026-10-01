@@ -17,10 +17,13 @@ import { computed, onMounted, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import SidecarOffline from '@/components/SidecarOffline.vue'
 import { usePolling } from '@/core/polling'
+import { copyText } from '@/core/clipboard'
 import { api, ensureSidecar } from '@/core/sidecar'
+import { useUiStore } from '@/core/ui'
 import PortsPanel from './PortsPanel.vue'
 import AgentsPanel from './AgentsPanel.vue'
 
+const ui = useUiStore()
 const ready = ref(false)
 const loading = ref(false)
 const busy = ref('')
@@ -299,12 +302,7 @@ async function purgeStandby() {
 
 async function copyPath(p?: string) {
   if (!p) return
-  try {
-    await navigator.clipboard.writeText(String(p))
-    ElMessage.success(`路径已复制：${p}`)
-  } catch {
-    ElMessage.info(String(p))
-  }
+  await copyText(String(p), `路径已复制：${p}`)
 }
 
 async function addEntry(list: 'whitelist' | 'blacklist') {
@@ -491,7 +489,23 @@ onMounted(async () => {
           <!-- 这一拍的判定 -->
           <div v-if="decisions.length" class="ws-card pad" style="margin-top: 16px">
             <div class="h">这一拍的判定（{{ decisions.length }} 项）</div>
-            <el-table :data="decisions" size="small" max-height="260">
+            <!-- 手机档换卡片：4 列最小合计 720px，其中「依据」单独 240px -->
+            <div v-if="ui.isMobile" class="ws-cards">
+              <div v-for="(row, i) in decisions" :key="i" class="ws-cards__item">
+                <div class="ws-cards__head">
+                  <div class="ws-cards__title">{{ row.name }} <span class="ws-dim">({{ row.pid }})</span></div>
+                </div>
+                <div class="ws-cards__fields">
+                  <span class="ws-cards__field"><span class="ws-cards__field-k">规则</span><span class="ws-cards__field-v">{{ row.rule }}</span></span>
+                  <span class="ws-cards__field"><span class="ws-cards__field-k">结论</span><span class="ws-cards__field-v">{{ row.verdict }}</span></span>
+                  <span class="ws-cards__field ws-cards__field--full">
+                    <span class="ws-cards__field-k">依据</span>
+                    <span class="ws-cards__field-v"><span class="ws-dim" style="font-size: 12px">{{ row.detail }}</span></span>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <el-table v-else :data="decisions" size="small" max-height="260">
               <el-table-column label="规则" width="110">
                 <template #default="{ row }">{{ row.rule }}</template>
               </el-table-column>
@@ -516,7 +530,24 @@ onMounted(async () => {
               </div>
               <el-button size="small" @click="onTab('log')">看全部</el-button>
             </div>
-            <el-table v-if="j?.recent?.length" :data="j.recent.slice(0, 8)" size="small" style="margin-top: 10px">
+            <!-- 手机档换卡片：5 列最小合计 696px -->
+            <div v-if="j?.recent?.length && ui.isMobile" class="ws-cards" style="margin-top: 10px">
+              <div v-for="(row, i) in j.recent.slice(0, 8)" :key="i" class="ws-cards__item">
+                <div class="ws-cards__head">
+                  <div class="ws-cards__title">{{ row.name || '—' }} <span class="ws-dim">({{ row.pid }})</span></div>
+                  <el-tag :type="outcomeType(row.outcome)" size="small" effect="plain">{{ row.outcomeText }}</el-tag>
+                </div>
+                <div class="ws-cards__fields">
+                  <span class="ws-cards__field"><span class="ws-cards__field-k">时间</span><span class="ws-cards__field-v">{{ fmtTime(row.at) }}</span></span>
+                  <span class="ws-cards__field"><span class="ws-cards__field-k">规则</span><span class="ws-cards__field-v">{{ row.rule }}</span></span>
+                  <span class="ws-cards__field ws-cards__field--full">
+                    <span class="ws-cards__field-k">依据</span>
+                    <span class="ws-cards__field-v"><span class="ws-dim" style="font-size: 12px">{{ row.detail }}</span></span>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <el-table v-else-if="j?.recent?.length" :data="j.recent.slice(0, 8)" size="small" style="margin-top: 10px">
               <el-table-column label="时间" width="146">
                 <template #default="{ row }">{{ fmtTime(row.at) }}</template>
               </el-table-column>

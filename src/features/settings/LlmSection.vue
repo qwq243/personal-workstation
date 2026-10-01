@@ -246,6 +246,15 @@ onMounted(load)
 </template>
 
 <style scoped>
+/* 「对话 / 编译」这类小标签。原来只在 WikiSettingsView 的 scoped 样式里有定义，
+   这一段被拆出来成独立组件后就丢了 —— 于是这两个词按正文字号在显示。 */
+.st__num {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--ws-fs-sm);
+  color: var(--ws-text-2);
+}
 .st__row {
   display: flex;
   gap: 8px;
@@ -253,7 +262,7 @@ onMounted(load)
   flex-wrap: wrap;
 }
 .st__select {
-  min-width: 260px;
+  min-width: min(100%, 260px);
   flex: 0 0 auto;
 }
 .st__opt-hint {

@@ -3,12 +3,12 @@ import type { Component } from 'vue'
 import { createPinia } from 'pinia'
 // ↓ 新图标加在这里（import 与 ICONS 两处）
 import {
-  Aim, AlarmClock, ArrowDown, ArrowLeft, ArrowRight, Bell, Box, Briefcase, Calendar, ChatDotRound,
+  Aim, AlarmClock, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, Box, Briefcase, Calendar, ChatDotRound,
   CaretBottom, CaretRight, Checked, CircleCheck, CircleCheckFilled, CircleCloseFilled, Clock, Close, CloseBold, Cloudy, Coin, Compass, Connection, CopyDocument, Cpu, DataBoard,
   DataLine,
-  Delete, Document, Download, EditPen, Expand, Film, Files, Finished, Flag, Fold, FolderOpened, Grid, Headset, Hide, Histogram, InfoFilled, Iphone, Key, Link, Loading,
+  Delete, Document, Download, EditPen, Expand, Film, Files, Finished, Flag, Fold, FolderOpened, FullScreen, Grid, Headset, Hide, Histogram, InfoFilled, Iphone, Key, Link, Loading,
   List, Location, MagicStick, Menu, Microphone, Minus, Monitor, Moon, MoreFilled, Notebook, Opportunity, Picture, Plus, Printer, Promotion, Reading, Refresh, RefreshRight,
-  Right, Search, Select, Setting, Share, Star, StarFilled, SuccessFilled, Sunny, Switch, SwitchButton, Timer, Tools, TrendCharts, Trophy,
+  Right, ScaleToOriginal, Search, Select, Setting, Share, Star, StarFilled, SuccessFilled, Sunny, Switch, SwitchButton, Timer, Tools, TrendCharts, Trophy,
   Upload, User, UserFilled, VideoCamera, VideoPause, VideoPlay, View, Wallet, WarningFilled,
 } from '@element-plus/icons-vue'
 
@@ -26,6 +26,8 @@ import 'element-plus/es/components/message-box/style/css'
 import '@/styles/index.css'
 // 知识库模块的内部观感（卡片/表格/标签/指标卡），8 个界面共用一份
 import '@/styles/wiki.css'
+// 号池模块（额度概览 / 账号池 / 活动管理 / 测聊 / 网关配置）共用的样式
+import '@/styles/workbuddy.css'
 
 import App from './App.vue'
 import { createAppRouter, takeResumePath } from './router'
@@ -61,12 +63,12 @@ app.use(createPinia())
  */
 // ↓ 新图标加在这里（import 与 ICONS 两处）
 const ICONS: Record<string, Component> = {
-  Aim, AlarmClock, ArrowDown, ArrowLeft, ArrowRight, Bell, Box, Briefcase, Calendar, ChatDotRound,
+  Aim, AlarmClock, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, Box, Briefcase, Calendar, ChatDotRound,
   CaretBottom, CaretRight, Checked, CircleCheck, CircleCheckFilled, CircleCloseFilled, Clock, Close, CloseBold, Cloudy, Coin, Compass, Connection, CopyDocument, Cpu, DataBoard,
   DataLine,
-  Delete, Document, Download, EditPen, Expand, Film, Files, Finished, Flag, Fold, FolderOpened, Grid, Headset, Hide, Histogram, InfoFilled, Iphone, Key, Link, Loading,
+  Delete, Document, Download, EditPen, Expand, Film, Files, Finished, Flag, Fold, FolderOpened, FullScreen, Grid, Headset, Hide, Histogram, InfoFilled, Iphone, Key, Link, Loading,
   List, Location, MagicStick, Menu, Microphone, Minus, Monitor, Moon, MoreFilled, Notebook, Opportunity, Picture, Plus, Printer, Promotion, Reading, Refresh, RefreshRight,
-  Right, Search, Select, Setting, Share, Star, StarFilled, SuccessFilled, Sunny, Switch, SwitchButton, Timer, Tools, TrendCharts, Trophy,
+  Right, ScaleToOriginal, Search, Select, Setting, Share, Star, StarFilled, SuccessFilled, Sunny, Switch, SwitchButton, Timer, Tools, TrendCharts, Trophy,
   Upload, User, UserFilled, VideoCamera, VideoPause, VideoPlay, View, Wallet, WarningFilled,
 }
 

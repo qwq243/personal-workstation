@@ -6,6 +6,7 @@ import { exportAll, importAll, listKeys, loadJSON, removeJSON, usedBytes } from 
 import { getModules } from '@/core/registry'
 import { leafMap, RECOMMENDED_PINS } from '@/core/leaf-pages'
 import { api, ensureSidecar, sidecarBase, sidecarState } from '@/core/sidecar'
+import { copyText } from '@/core/clipboard'
 import LlmSection from '@/features/settings/LlmSection.vue'
 import EmbeddingSection from '@/features/settings/EmbeddingSection.vue'
 import SearchSection from '@/features/settings/SearchSection.vue'
@@ -139,12 +140,8 @@ function previewOf(key: string): string {
 }
 
 async function copyMcp() {
-  try {
-    await navigator.clipboard.writeText(`${sidecarBase()}/mcp`)
-    ElMessage.success('已复制 MCP 端点')
-  } catch {
-    ElMessage.warning(`请手动复制：${sidecarBase()}/mcp`)
-  }
+  // 三层兜底（现代 API → execCommand → 手选面板）统一在 core/clipboard
+  await copyText(`${sidecarBase()}/mcp`, '已复制 MCP 端点')
 }
 
 /* ------------------------------------------------------------- 服务配置 ---

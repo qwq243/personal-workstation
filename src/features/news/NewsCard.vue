@@ -12,7 +12,7 @@
 import { computed, ref } from 'vue'
 import { api } from '@/core/sidecar'
 import { useUiStore } from '@/core/ui'
-import { ChsiIcon, XIcon, LinuxDoIcon, V2exIcon, HnIcon, GithubIcon, SspaiIcon, WeixinIcon, RssIcon } from './sourceIcons'
+import { ChsiIcon, XIcon, LinuxDoIcon, V2exIcon, HnIcon, GithubIcon, SspaiIcon, WeixinIcon, BiliIcon, RssIcon } from './sourceIcons'
 
 const ui = useUiStore()
 
@@ -53,8 +53,11 @@ const SOURCE_ICON: Record<string, any> = {
   'wx-jiqizhixin': WeixinIcon,
   'wx-qbitai': WeixinIcon,
   'wx-paperweekly': WeixinIcon,
+  // B 站视频渠道：整个平台挂一枚图标（键是平台名，不是某一个账号）
+  bili: BiliIcon,
 }
-const icon = (id: string) => SOURCE_ICON[id] ?? RssIcon
+/** 先精确匹配源 id，再按平台前缀兜底（`bili-xxx` 这类「一个平台挂多个账号」的源） */
+const icon = (id: string) => SOURCE_ICON[id] ?? SOURCE_ICON[String(id).split('-')[0]] ?? RssIcon
 
 /** 情绪三段（有评论数就用真实条数，没有就按词典判定给一个比例，标了来源） */
 const moodPct = computed(() => {

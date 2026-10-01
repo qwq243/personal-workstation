@@ -19,9 +19,9 @@
 - **长任务一律「起任务 + 轮询」**：转写、文档解析、入库编译都不在一个请求里等完（Node 默认 `requestTimeout` 是 5 分钟）。
 - **「没配 = 不显示」是内核约定**：模块的 `visible()` 在依赖的目录 / 端点没填时返回 false，它就从侧边栏消失，而不是点进去看一页报错（`src/core/appconfig.ts`）。
 - **配置分层**：非敏感配置与密钥分两个文件放，密钥由 `SECRET_PATHS` 自动分流，仓库里只提交带说明的模板。
-- **给智能体留了入口**：边车上挂了一个 MCP（JSON-RPC 子集，`/mcp`），54 个工具覆盖看板、规划台、词单、做题本、知识库、资讯、语音随记（含热词库）、进程与端口查询。
+- **给智能体留了入口**：边车上挂了一个 MCP（JSON-RPC 子集，`/mcp`），55 个工具覆盖看板、规划台、词单、做题本、知识库、资讯、语音随记（含热词库）、余额与号池额度、进程与端口查询。
 - **导航、主题、手机档都是内核决定**：大模块分组（本机 / 日常 / 学习 / 智能体 / 工具）在 `src/core/types.ts`，**只有叶子页面能置顶**（判据收在 `src/core/leaf-pages.ts` 一份），主题四档（按时间自动 / 浅色 / 深色 / 跟随系统）在 `src/core/ui.ts`，手机档（≤760px）把侧边栏变抽屉、宽表变卡片。
-- **四条真机门禁**：`check:pages`（页面宽度，挂在 `build` 前）/ `check:nav`（侧边栏箭头与图钉互补、图标真渲染）/ `check:mobile`（390px 视口逐页查横向溢出）/ `check:dark`（暗色亮斑）`check:theme`（主题四档真鼠标点）/ `check:ai-ui`（AI 界面收口）。它们要跑起边车与页面才能测，所以不进 CI，改样式时手动跑（见 [docs/verifying.md](docs/verifying.md)）。
+- **六条门禁**：`check:pages`（页面宽度）与 `check:styles`（样式「写了却加载不到」）是纯静态检查，挂在 `build` 前；`check:nav`（侧边栏箭头与图钉互补、图标真渲染）/ `check:mobile`（390px 视口逐页查横向溢出）/ `check:dark`（暗色亮斑）/ `check:theme`（主题四档真鼠标点）/ `check:ai-ui`（AI 界面收口）要跑起边车与页面才能测，所以不进 CI，改样式时手动跑（见 [docs/verifying.md](docs/verifying.md)）。
 
 ## 架构一览
 
@@ -152,6 +152,7 @@ npm run dev:all    # 一条命令起两个：边车（后台）+ Vite（前台�
 | 资讯 | 一个采集器产物目录（`collector.dir`，示例：`scripts/collector-skeleton.mjs`） | 该模块**不出现在侧边栏** |
 | 做题本导出 PDF | 本机 Chrome 或 Edge | 页面照常，导出会回一句「本机没找到 Chrome / Edge」 |
 | 知识库 | `wiki.dir` 指到一个库目录 | 该模块不出现在侧边栏 |
+| 号池（额度 / 账号池 / 活动任务） | 第三方开源网关 [WorkBuddy2API](https://github.com/Sliverkiss/workbuddy2api)，装好后把目录填进 `workbuddy.dir`、地址填进 `workbuddy.baseUrl` | 该模块**不出现在侧边栏**；网关不随本仓库分发 |
 
 ### 端口
 
@@ -293,11 +294,12 @@ workstation-oss/
 │  │  ├─ vocab/                英语学习（每日一句 + 单词，含 srs.ts / parser.ts / engine.ts）
 │  │  ├─ wiki/                 知识库（工作区 + 5 个 panel + 问答 + 入库 + 设置）
 │  │  ├─ news/                 资讯（读采集器产物：AI 事件卡 / 批次轮播 / 时间线 / 案卷 / 反馈调教）
+│  │  ├─ workbuddy/           号池（额度概览 / 账号池 / 活动管理 / 测聊 / 网关配置；网关本身要自己装）
 │  │  ├─ memo/                 语音随记（转写 / 记录 / 配置 三子页）
 │  │  ├─ guard/                进程守护（概览 / 进程 / 参数 / 名单 / 日志 / 端口 / 智能体）
 │  │  ├─ service/              运行与自启（边车状态 + 开机自启位；一个模块只占一个页面 + 一条接口，可当范本抄）
 │  │  └─ settings/             LlmSection · EmbeddingSection · SearchSection（**不是模块**，只被设置页引用）
-│  ├─ styles/                  tokens.css（设计令牌 = 唯一配色源）· index.css · wiki.css
+│  ├─ styles/                  tokens.css（设计令牌 = 唯一配色源）· index.css · wiki.css · workbuddy.css
 │  ├─ assets/                  brand/ws-logo.webp · katex-fonts/（5 个 woff2）
 │  └─ types/                   assets.d.ts · env.d.ts · router.d.ts
 ├─ server/
@@ -311,8 +313,8 @@ workstation-oss/
 ├─ scripts/                    start.mjs · dev-all.mjs · seed-demo-data.mjs
 │  │                            parser-parity.mjs · pguard-smoke.mjs
 │  │                            collector-skeleton.mjs（最小示例采集器：抓两个公开 RSS）
-│  │                            check-page-width.mjs · check-nav.cjs · check-mobile.cjs ·
-│  │                            check-dark.cjs · check-theme.cjs · check-ai-ui.mjs · math-typeset-check.mjs
+│  │                            check-page-width.mjs · check-styles.cjs · check-nav.cjs ·
+│  │                            check-mobile.cjs · check-dark.cjs · check-theme.cjs · check-ai-ui.mjs · math-typeset-check.mjs
 │  ├─ new-feature.mjs          ★ 生成一个功能模块骨架（注册 / 图标 / 接口 / 配置一起改好）
 │  ├─ panel-autostart.mjs      自启位的命令行开关（`#/service` 那一页的无界面版）
 │  ├─ lib/feature-scan.mjs     扫描 src/features 的静态解析（生成器与契约测试共用）
@@ -365,6 +367,7 @@ workstation-oss/
 | **知识库** | 学习 | `#/wiki` | 抓链接 / 拖文件 → 队列 → 编译成互链页面；语义检索、双链图谱、会话问答、结构体检 | `wiki.dir`（**没配就不显示**） |
 | **资讯** | 学习 | `#/news` | 采集器产物 → AI 事件卡 + 批次轮播 + 关注时间线 + 案卷溯源 + 反馈调教 | `collector.dir`（**没配就不显示**；见 [docs/news-contract.md](docs/news-contract.md)） |
 | **模型用量** | 智能体 | `#/office/usage` | 余额、今日花费、按模型 / 密钥的分布、请求日志（走缓存，打开秒显） | `newapi.baseUrl` + 令牌 |
+| **号池** | 智能体 | `#/office/workbuddy` | 第三方网关 WorkBuddy2API 的客户端，五子页：**额度概览**（积分 / 账号池 / 调用统计 / 请求日志 / 模型清单）· **账号池**（增删停用、网页登录、导入凭证）· **活动管理**（六类排程任务的开关与逐账号明细）· **测聊** · **网关配置**（读 / 存 / 备份 / 重启） | `workbuddy.dir`（**没配就不显示**）；网关本身要自己装，见「可选件」 |
 | **语音随记** | 工具 | `#/memo` | 传一段录音 → 转写 → 自动起标题写摘要 → 落成记录；三子页（转写 / 记录 / 配置），带热词库与原始音频回放 | `asr.baseUrl`（**没配就不显示**） |
 | **进程守护** | 本机 | `#/process-guard` | 按 CPU 阈值释放开发工具内存、结束失控进程、定时回收；另带端口与智能体视图。**出厂演练模式：只记录不动手** | 无 |
 | **运行与自启** | 本机 | `#/service` | 边车自己的状态（端口 / PID / node / 入口）＋ 开机自启位体检（编码 / 路径 / 用的哪个 node）与开启 / 关闭 / 删除 | 无（Windows 才用得上，见「环境要求」） |
@@ -406,7 +409,7 @@ curl -s -X POST http://127.0.0.1:5278/mcp \
 - [docs/TOP-DESIGN.md](docs/TOP-DESIGN.md) —— **顶层设计**：分层、单一事实源、复用声明机制、债务台账、文案与注释规约、性能基线
 - [docs/EXTENDING.md](docs/EXTENDING.md) —— **上手扩展指南**：内核概念、加页面模块 / 加边车接口的完整步骤、数据与长任务约定、别这么做的坑
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) —— 架构：分层与数据流、一次请求的完整链路、鉴权握手、边车的启动与生命周期、单实例与自启、取舍与已知限制
-- [docs/FEATURES.md](docs/FEATURES.md) —— 功能清单：注册了哪些模块、内核自带页面、边车能力清单、MCP 工具（54 个）、外部依赖清单、命令一览，以及**本开源版移除 / 泛化了什么**
+- [docs/FEATURES.md](docs/FEATURES.md) —— 功能清单：注册了哪些模块、内核自带页面、边车能力清单、MCP 工具（55 个）、外部依赖清单、命令一览，以及**本开源版移除 / 泛化了什么**
 - [docs/CONFIG.md](docs/CONFIG.md) —— 配置与凭据：四个位置、读写机制（合并 / 脱敏 / 只写差异）、`DEFAULTS` 逐项、页面上能改什么（白名单）、环境变量、改端口、关鉴权与换令牌
 - [docs/PRIVACY.md](docs/PRIVACY.md) —— 脱敏说明：哪六类东西不该进仓库、复查方法（字面量 + 模式扫描）、待办清单
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) —— 性能盘点：已知慢点与首屏体积，按收益排的改进计划

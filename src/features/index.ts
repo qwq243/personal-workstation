@@ -13,6 +13,7 @@ import { dashboardModule } from './dashboard/module'
 import { planModule } from './plan/module'
 import { calendarModule } from './office/calendar.module'
 import { usageModule } from './office/usage.module'
+import { workbuddyModule } from './workbuddy/module'
 import { vocabModule } from './vocab/module'
 import { zuotibenModule } from './zuotiben/module'
 import { newsModule } from './news/module'
@@ -33,8 +34,9 @@ export function registerAllModules(): void {
   registerModule(vocabModule)
   registerModule(wikiModule)
   registerModule(newsModule)
-  // 智能体组（order 20–29）：模型那一侧
+  // 智能体组（order 20–29）：模型那一侧 —— 模型用量 → 号池额度
   registerModule(usageModule)
+  registerModule(workbuddyModule)
   // 工具组（order 30–39）：干杂事的器具
   registerModule(memoModule)
   // 日常组（order 40–49）：每天要看的执行面 —— 每日看板 → 日历日程 → 规划台

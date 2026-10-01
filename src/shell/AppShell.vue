@@ -3,8 +3,9 @@
  * 全局布局壳：左侧功能导航 + 顶部面包屑 / 主题切换 + 内容区。
  * 侧边栏完全由功能注册表派生 —— 新增功能无需改这里。
  */
-import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { getGroupedModules, getModules } from '@/core/registry'
 import { leafMap, pinnedEntries, subRows, hasSubRows } from '@/core/leaf-pages'
 import { useUiStore, type ThemeMode } from '@/core/ui'
@@ -97,6 +98,53 @@ const themeMenuLabel = computed(() => {
           : '亮色'
   return `主题：${mode} · 当前${now}`
 })
+
+/* --------------------------------------------------------- 全屏（平板用） ---
+ * 主要给平板浏览器（iPad Safari 这类壳）看板用的：整页进全屏后浏览器的地址栏、
+ * 标签栏都收掉，面板就是一整块屏。点击进、再点退，Esc 退出时状态也要跟上来。
+ *
+ * 兼容性按运行时探测来，不按设备猜：Safari 系（含 iOS 各壳）的全屏 API 有 webkit 前缀
+ * 的一代，标准 API 又只在较新的内核才有 —— 两个都没有的（老 iPhone 上的 WKWebView
+ * 这类）按钮直接不渲染，不留一颗点了没反应的死按钮。进了全屏必须由用户手势触发，
+ * 这里本来就挂在点击上；被内核拒绝（极少见）就出一句提示。
+ */
+const fsActive = ref(false)
+const fsSupported = (() => {
+  if (typeof document === 'undefined') return false
+  const el = document.documentElement as any
+  return typeof el.requestFullscreen === 'function' || typeof el.webkitRequestFullscreen === 'function'
+})()
+
+function fsElement(): Element | null {
+  return document.fullscreenElement ?? (document as any).webkitFullscreenElement ?? null
+}
+function syncFs() {
+  fsActive.value = !!fsElement()
+}
+function toggleFullscreen() {
+  const el = document.documentElement as any
+  if (fsElement()) {
+    ;(document.exitFullscreen ?? (document as any).webkitExitFullscreen)?.call(document)
+    return
+  }
+  const req = el.requestFullscreen ?? el.webkitRequestFullscreen
+  try {
+    const p = req?.call(el)
+    if (p && typeof p.catch === 'function') p.catch(() => ElMessage.warning('这个浏览器不允许网页进入全屏'))
+  } catch {
+    ElMessage.warning('这个浏览器不允许网页进入全屏')
+  }
+}
+if (fsSupported) {
+  onMounted(() => {
+    document.addEventListener('fullscreenchange', syncFs)
+    document.addEventListener('webkitfullscreenchange', syncFs)
+  })
+  onUnmounted(() => {
+    document.removeEventListener('fullscreenchange', syncFs)
+    document.removeEventListener('webkitfullscreenchange', syncFs)
+  })
+}
 
 /* ------------------------------------------------- 手机档：抽屉式导航 --- */
 
@@ -359,6 +407,19 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           注意：`element.click()` 这种合成点击**测不出**这个 bug（它绕过鼠标事件），
           要验就用 `Input.dispatchMouseEvent` 真点 —— check-dark.cjs 里有一条这个断言。
         -->
+        <!-- 全屏：主要给平板浏览器（iPad Safari 这类壳）看板用；进/退同一个按钮，
+             Esc 或系统的「完成」退出时图标也跟着换（fullscreenchange 同步）。不支持全屏
+             API 的内核不渲染这颗（别留点了没反应的死按钮）。 -->
+        <button
+          v-if="fsSupported"
+          class="icon-btn"
+          type="button"
+          :aria-label="fsActive ? '退出全屏' : '全屏'"
+          :title="fsActive ? '退出全屏' : '全屏'"
+          @click="toggleFullscreen"
+        >
+          <el-icon><ScaleToOriginal v-if="fsActive" /><FullScreen v-else /></el-icon>
+        </button>
         <el-dropdown trigger="click" @command="(v: string) => ui.setTheme(v as ThemeMode)">
           <button class="icon-btn" type="button" :aria-label="themeMenuLabel" :title="themeMenuLabel">
             <el-icon><Moon v-if="ui.resolvedTheme === 'dark'" /><Sunny v-else /></el-icon>

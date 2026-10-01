@@ -95,6 +95,22 @@
 
 120–200ms ease-out；hover 位移 ≤3px；保留 `prefers-reduced-motion` 全局降级；路由切换不用 JS transition（可靠性优先，见 App.vue 注释）。
 
+### 样式「加载不到」的三种毛病（`npm run check:styles` 兜底）
+
+路由是**懒加载**的，样式跟着 chunk 走 —— 于是有几类毛病肉眼很难复现，构建前由
+`scripts/check-styles.cjs` 静态拦住（三条断言，纯静态、不起浏览器，一两百毫秒跑完）：
+
+1. **家族样式没被这一页引**：`features/<模块>/*.css` 由各页自己 `<style>@import …</style>`
+   （`memo.css` / `wiki.css` 都是这个路子）。漏引的症状是「先进过同模块别的页就正常、
+   冷启动直接进这一页整页掉样式」—— 同一页两种长相，手工点一遍碰不到。
+2. **类只活在父组件的 scoped 样式里**：父组件的 scope 标记**只落在子组件根节点**，
+   子组件里面的节点吃不到。共用组件（`SentencePractice` 的 `.block__*`）与页面里的子组件
+   都踩过这条：看着有样式、实际是裸的。子组件自己用到的类，写进它自己的 `<style scoped>`。
+3. **`@keyframes` 挂在选择器下**（`.memo @keyframes …`）：非法嵌套，构建时被整块丢掉，
+   动画静默失效。动画名本来就是全局的，提到顶层写。
+
+三条都是「写了、没报错、也没生效」，所以它挂在 `npm run build` 之前 —— 与 `check:pages` 同一种用法。
+
 ## 5. Element Plus 对齐
 
 EP 令牌在 `tokens.css` 全量映射（`--el-color-primary` 全梯级 + 语义色 + 文字/边框/背景/填充）。
@@ -128,22 +144,24 @@ EP 令牌在 `tokens.css` 全量映射（`--el-color-primary` 全梯级 + 语义
    别用 `margin: 0 auto` 那一套给单页找补；真要窄栏用 `.ws-page--narrow`（并在旁边写明理由）。
 6. **手机档要一起想**：断点 760px（`core/ui.ts` 的 `MOBILE_MAX`，与 `AppShell.vue` 的媒体查询两处一致），
    宽表换 `.ws-cards` 卡片、侧边栏变抽屉；新写的卡片 / 行 / 网格按「别横向溢出、别把字挤成竖排」自查。
-7. 改完跑：`npm run build`（**它之前自动跑 `check:pages`**）+ `npm run typecheck`；
+7. 改完跑：`npm run build`（**它之前自动跑 `check:pages` 与 `check:styles`**）+ `npm run typecheck`；
    视觉改动自己截图看一眼（验收方法见 [verifying.md](verifying.md)）。
 
-### 7.1 四条门禁与 `--ws-page-max` 的关系
+### 7.1 几条门禁与 `--ws-page-max` 的关系
 
-样式这块有四条可执行的门禁 —— **别靠记性，跑它们**（都要先起边车；`WS_BASE` 可指向别处）：
+样式这块有两条**静态**门禁（不起浏览器，挂在 `npm run build` 之前）与四条**真机**门禁
+（要起边车与页面，`WS_BASE` 可指向别处）：
 
 | 门禁 | 管什么 | 与 `--ws-page-max` 的关系 |
 |---|---|---|
 | `npm run check:pages` | 页面宽度：任何 `max-width: ≥640px` 必须写明理由（或改用 `.ws-page--narrow`） | 它是这条规则的**唯一执行者** —— 挂在 `npm run build` 之前，所以「新页面又写了个 1120px」在构建这一步就红 |
+| `npm run check:styles` | 样式「写了却加载不到」：家族 css 漏引、类只活在父组件 scoped 里、`@keyframes` 挂错位置（见 §4） | 与宽度无关，但同属「静态拦在构建前」那一类 |
 | `npm run check:mobile` | 手机档（390×844）逐路由断言没有横向溢出 | 手机屏比 `--ws-page-max` 窄，这个变量在那里本来就不生效；真正要收的是内边距与表格/长串，所以它是独立一条 |
 | `npm run check:dark` | 暗色：逐路由量**计算样式**，列出「浅底 + 有文字」的亮斑（静态读 CSS 会得出相反结论） | 与宽度无关，但同一个「全站一个决定」的思路：主题变量只在 `tokens.css` 一处定义 |
 | `npm run check:theme` | 主题四档（按时间自动 / 浅色 / 深色 / 跟随系统）的功能测试：真鼠标事件 + 真重载 | 改 `--ws-*` 与 `html[data-theme]` 那套映射之后跑 |
 
 另外两条不属于「样式」但会一起被改坏：`npm run check:nav`（左栏箭头/图钉/图标的不变量，动导航与图标就跑）
-与 `npm run check:ai-ui`（AI 界面必须走 `src/ai/`，动对话界面就跑）。四条门禁的用法与失败怎么读见
+与 `npm run check:ai-ui`（AI 界面必须走 `src/ai/`，动对话界面就跑）。门禁的用法与失败怎么读见
 [verifying.md](verifying.md)。
 
 ## 8. 命名惯例

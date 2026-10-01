@@ -2,10 +2,12 @@
  * 工作站的 MCP server（Streamable HTTP，挂在本边车的 /mcp 上）。
  *
  * 目的：让智能体（任意 MCP 客户端）能读写工作站的数据 ——
- * 读今日看板、加计划、写笔记、查余额、读写词单、读写知识库、读写规划台、操作语音随记。
+ * 读今日看板、加计划、写笔记、查余额、读号池额度、读写词单、读写知识库、读写规划台、操作语音随记。
  * 与「MCP 只是另一条读取通道」不同，这里也提供写能力，因为看板的价值就在于被自动记录。
  *
- * 工具表只覆盖**本项目自带的能力**：任何依赖特定机构私有接口或使用者本机服务的工具都不在这里。
+ * 工具表只覆盖**本项目自带的能力**：任何依赖特定机构私有接口的工具都不在这里。
+ * 依赖**可选外部服务**（资讯采集器、号池网关）的工具，配好之后才有数据 —— 没配时明说
+ * 「还没配」，而不是回一堆空值。
  * 想加自己的数据源，照下面 TOOLS 与 HANDLERS 各加一条即可（两边名字必须一致）。
  *
  * 实现方式是 JSON-RPC 2.0 的子集：initialize / tools/list / tools/call (+ ping)。
@@ -16,6 +18,7 @@ import * as plan from './lib/plan.mjs'
 import * as pguard from './lib/pguard.mjs'
 import * as procscan from './lib/procscan.mjs'
 import * as newapi from './lib/newapi.mjs'
+import * as workbuddy from './lib/workbuddy.mjs'
 import * as ai from './lib/ai.mjs'
 import * as vocab from './lib/vocab.mjs'
 import * as wiki from './lib/wiki.mjs'
@@ -112,6 +115,15 @@ const TOOLS = [
   {
     name: 'get_balance',
     description: '读 NewAPI 账户余额、各密钥累计花费、今日花费与最近请求日志。',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_workbuddy',
+    description:
+      '读号池（经本机 WorkBuddy2API 网关）：剩余/已用积分、每个账号的积分与状态、' +
+      '网关调用统计（请求数/token/缓存命中/积分消耗）。注意它与 get_balance 是两条独立账 ——' +
+      'get_balance 是 NewAPI 充值的钱，这里是上游发积分（不花钱但会过期）。' +
+      '没配网关（config.workbuddy.dir 为空）时回一句「还没配」。',
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -776,6 +788,26 @@ const HANDLERS = {
       b.ok ? `余额 ¥${b.quotaYuan}（累计已用 ¥${b.usedYuan}，请求 ${b.requestCount}）` : `余额读取失败：${b.error}`,
       s.todaySpend?.ok ? `今日花费 ¥${s.todaySpend.totalYuan}：${s.todaySpend.items.slice(0, 6).map((i) => `${i.name} ¥${i.yuan}`).join('，')}` : '',
     ].filter(Boolean)
+    return ok(lines.join('\n'), { data: s })
+  },
+
+  async get_workbuddy() {
+    const s = await workbuddy.snapshot()
+    if (!s.ok) return ok(`号池读不到：${s.error}`, { error: true, data: s })
+    const t = s.credit?.total
+    const lines = [
+      t
+        ? `积分：剩 ${t.remain} / 共 ${t.size}（已用 ${t.used}）`
+        : '积分：暂未取到（边车后台会重试；也可到额度页点刷新）',
+      `账号池：可用 ${s.status.healthy}/${s.status.total}` +
+        (s.status.cooling ? `，冷却 ${s.status.cooling}` : '') +
+        (s.status.disabled ? `，禁用 ${s.status.disabled}` : ''),
+      `网关已服务 ${s.stats.requests} 次（成功 ${s.stats.success} / 失败 ${s.stats.failed}），` +
+        `消耗积分 ${s.stats.credit}，token ${s.stats.totalTokens}`,
+    ]
+    for (const a of s.credit?.accounts ?? []) {
+      lines.push(`  ${a.nickname || a.uid.slice(0, 8)}：${a.remain}/${a.size}${a.error ? `（${a.error}）` : ''}`)
+    }
     return ok(lines.join('\n'), { data: s })
   },
 

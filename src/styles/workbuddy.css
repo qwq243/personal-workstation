@@ -1,0 +1,386 @@
+/* ============================================================================
+   WorkBuddy 运维子页共用样式（账号池 / 活动管理 / 测聊 / 网关配置）
+
+   前缀用 wbo-（workbuddy ops），刻意不复用额度页的 wb-：那批类名在
+   WorkbuddyView.vue 里是 scoped 的，放全局会反向染到额度页上。
+   颜色一律走 tokens.css 的令牌，不在本文件里写死色值。
+   ========================================================================== */
+
+/* 模型限额弹窗挂在 body 上，额度页的 scoped 样式盖不到。
+   弹窗默认字体没有彩色字形，emoji 昵称会渲成空白，补上系统 emoji 字体。 */
+.wb-qdialog {
+  font-family: var(--ws-font), "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji";
+}
+
+/* ------------------------------------------------------------ 小块布局 -- */
+.wbo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.wbo-note {
+  color: var(--ws-text-3);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.wbo-block {
+  padding: 16px 18px;
+}
+.wbo-block__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.wbo-block__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 650;
+  font-size: var(--ws-fs-md);
+}
+.wbo-grid {
+  display: grid;
+  gap: 16px;
+}
+.wbo-grid--2 {
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+}
+
+/* ---------------------------------------------------------------- 表格 -- */
+.wbo-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.wbo-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--ws-text-3);
+  padding: 0 10px 8px;
+  border-bottom: 1px solid var(--ws-border);
+  white-space: nowrap;
+}
+.wbo-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--ws-border);
+  vertical-align: top;
+}
+.wbo-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.wbo-table tbody tr:hover {
+  background: var(--ws-panel-2);
+}
+.wbo-table__sub {
+  color: var(--ws-text-3);
+  font-size: 11.5px;
+  margin-top: 3px;
+}
+
+/* ------------------------------------------------------------ 状态标签 -- */
+.wbo-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--ws-radius-pill);
+  font-size: 11.5px;
+  line-height: 1.7;
+  white-space: nowrap;
+  background: var(--ws-panel-2);
+  color: var(--ws-text-2);
+  border: 1px solid var(--ws-border);
+}
+.wbo-tag.is-ok {
+  background: var(--ws-success-soft);
+  color: var(--ws-success);
+  border-color: transparent;
+}
+.wbo-tag.is-warn {
+  background: var(--ws-warn-soft);
+  color: var(--ws-warn);
+  border-color: transparent;
+}
+.wbo-tag.is-danger {
+  background: var(--ws-danger-soft);
+  color: var(--ws-danger);
+  border-color: transparent;
+}
+.wbo-tag.is-info {
+  background: var(--ws-info-soft);
+  color: var(--ws-info);
+  border-color: transparent;
+}
+.wbo-tag + .wbo-tag {
+  margin-left: 6px;
+}
+
+/* ---------------------------------------------------------------- 横条 -- */
+.wbo-bar {
+  height: 6px;
+  border-radius: var(--ws-radius-pill);
+  background: var(--ws-border);
+  overflow: hidden;
+}
+.wbo-bar--sm {
+  height: 4px;
+}
+.wbo-bar__fill {
+  height: 100%;
+  border-radius: var(--ws-radius-pill);
+  background: var(--ws-accent);
+}
+.wbo-bar__fill.is-ok {
+  background: var(--ws-success);
+}
+.wbo-bar__fill.is-warn {
+  background: var(--ws-warn);
+}
+.wbo-bar__fill.is-danger {
+  background: var(--ws-danger);
+}
+
+/* ------------------------------------------------------------ KPI 卡片 -- */
+.wbo-kpi {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.wbo-kpi__card {
+  padding: 14px 16px;
+}
+.wbo-kpi__label {
+  color: var(--ws-text-3);
+  font-size: 12px;
+}
+.wbo-kpi__value {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-top: 4px;
+}
+.wbo-kpi__value i {
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ws-text-3);
+  margin-left: 3px;
+}
+.wbo-kpi__foot {
+  color: var(--ws-text-3);
+  font-size: 11.5px;
+  margin-top: 4px;
+}
+
+/* ------------------------------------------------------- 任务明细列表 -- */
+.wbo-items {
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--ws-border);
+  border-radius: var(--ws-radius);
+}
+.wbo-items__row {
+  display: grid;
+  grid-template-columns: 22px minmax(90px, 150px) 1fr;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--ws-border);
+  align-items: start;
+}
+.wbo-items__row:last-child {
+  border-bottom: none;
+}
+.wbo-items__row.is-bad {
+  background: var(--ws-danger-soft);
+}
+.wbo-items__msg {
+  color: var(--ws-text-2);
+  word-break: break-all;
+}
+.wbo-items__name {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+/* ---------------------------------------------------------------- 测聊 -- */
+.wbo-chat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1080px) {
+  .wbo-chat {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.wbo-chat__log {
+  min-height: 220px;
+  max-height: 52vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 2px;
+}
+.wbo-chat__turn {
+  border: 1px solid var(--ws-border);
+  border-radius: var(--ws-radius);
+  padding: 10px 12px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wbo-chat__turn--user {
+  background: var(--ws-accent-soft);
+  border-color: transparent;
+}
+.wbo-chat__turn--assistant {
+  background: var(--ws-panel-2);
+}
+.wbo-chat__turn--error {
+  background: var(--ws-danger-soft);
+  border-color: transparent;
+  color: var(--ws-danger);
+}
+.wbo-chat__role {
+  font-size: 11.5px;
+  color: var(--ws-text-3);
+  margin-bottom: 5px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.wbo-chat__think {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--ws-border-strong);
+  color: var(--ws-text-3);
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow: auto;
+}
+.wbo-chat__form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 12px;
+}
+.wbo-chat__metrics {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ws-text-2);
+}
+
+/* ------------------------------------------------------------ 配置表单 -- */
+.wbo-form__row {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 10px 14px;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--ws-border);
+}
+.wbo-form__row:last-child {
+  border-bottom: none;
+}
+.wbo-form__label {
+  color: var(--ws-text-2);
+  font-size: 12.5px;
+}
+.wbo-form__hint {
+  color: var(--ws-text-3);
+  font-size: 11.5px;
+  margin-top: 3px;
+}
+.wbo-code {
+  width: 100%;
+  min-height: 420px;
+  font-family: var(--ws-mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  padding: 12px 14px;
+  border: 1px solid var(--ws-border);
+  border-radius: var(--ws-radius);
+  background: var(--ws-panel-2);
+  color: var(--ws-text);
+  resize: vertical;
+}
+.wbo-code:focus {
+  outline: none;
+  border-color: var(--ws-accent);
+  box-shadow: 0 0 0 3px var(--ws-accent-ring);
+}
+
+/* ------------------------------------------------------- 账号池主机切换 --- */
+.wb-hosts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+}
+.wb-hosts__label {
+  font-size: 12px;
+  color: var(--ws-text-3);
+  margin-right: 2px;
+}
+.wb-hosts__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ws-text-2);
+  background: var(--ws-panel-2);
+  border: 1px solid var(--ws-border);
+  border-radius: var(--ws-radius-pill);
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.wb-hosts__btn:hover { color: var(--ws-text); }
+.wb-hosts__btn.is-active {
+  color: var(--ws-accent);
+  border-color: var(--ws-accent);
+  background: var(--ws-accent-soft);
+  font-weight: 600;
+}
+.wb-hosts__tag {
+  font-style: normal;
+  font-size: 10.5px;
+  padding: 0 5px;
+  border-radius: var(--ws-radius-pill);
+  background: var(--ws-panel);
+  color: var(--ws-text-3);
+  border: 1px solid var(--ws-border);
+}
+.wb-hosts__tag.is-bad { color: var(--ws-danger); border-color: var(--ws-danger); }
+.wb-hosts__note {
+  font-size: 11.5px;
+  color: var(--ws-text-3);
+  margin-left: auto;
+}
+
+/* --------------------------------------------------------- 跨池重复告警 --- */
+.wb-dupe {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border-color: var(--ws-warn);
+}
+.wb-dupe__icon { color: var(--ws-warn); font-size: 18px; margin-top: 2px; }
+.wb-dupe__body { margin: 6px 0 0; font-size: 12.5px; color: var(--ws-text-2); line-height: 1.6; }
+.wb-dupe__who { margin: 6px 0 0; font-size: 12px; color: var(--ws-text-3); }
